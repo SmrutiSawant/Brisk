@@ -100,6 +100,15 @@ const SEARCH_ENGINES = [
     note: 'Proprietary · general purpose',
     search: (q) => 'https://duckduckgo.com/?q=' + encodeURIComponent(q),
   },
+  {
+    id: 'google',
+    name: 'Google',
+    // The widest index there is, and the least private option on the list —
+    // it profiles the query and the person making it. Here because sometimes
+    // nothing else finds the thing.
+    note: 'Proprietary · widest index, tracks you',
+    search: (q) => 'https://www.google.com/search?q=' + encodeURIComponent(q),
+  },
 ];
 
 let engineId = SEARCH_ENGINES[0].id;

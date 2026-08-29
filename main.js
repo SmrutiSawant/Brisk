@@ -86,7 +86,7 @@ const isBool = (v) => typeof v === 'boolean';
 const isString = (v) => typeof v === 'string';
 
 const VALIDATORS = {
-  searchEngine: (v) => isString(v) && ['searxng', 'marginalia', 'duckduckgo'].includes(v),
+  searchEngine: (v) => isString(v) && ['searxng', 'marginalia', 'duckduckgo', 'google'].includes(v),
   searxngInstance: (v) => isString(v) && /^https?:\/\/[^\s/]+$/i.test(v),
 
   httpsOnly: isBool,

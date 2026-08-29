@@ -33,6 +33,7 @@ const ENGINES = {
   searxng:    { name: 'SearXNG',    action: instance + '/search',                   param: 'q' },
   marginalia: { name: 'Marginalia', action: 'https://marginalia-search.com/search', param: 'query' },
   duckduckgo: { name: 'DuckDuckGo', action: 'https://duckduckgo.com/',              param: 'q' },
+  google:     { name: 'Google',     action: 'https://www.google.com/search',         param: 'q' },
 };
 
 const engine = ENGINES[params.get('engine')] || ENGINES.searxng;

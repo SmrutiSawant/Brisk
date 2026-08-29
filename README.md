@@ -59,17 +59,18 @@ Brisk uses `@ghostery/adblocker-electron` with EasyList and EasyPrivacy filters 
 
 **Search engines**
 
-Instead of relying on Google, Brisk provides three search engine options:
+Brisk provides four search engine options:
 
 | Search engine | What it's useful for |
 |---|---|
 | SearXNG (default) | General-purpose search using results from multiple search engines |
 | Marginalia | Finding blogs, essays, independent websites, and text-heavy content |
 | DuckDuckGo | A reliable alternative for everyday searches |
+| Google | The widest index, when nothing else finds it |
 
 The selected search engine is saved, so you don't have to choose it every time you open the browser.
 
-SearXNG and Marginalia are open-source and can also be self-hosted. Google isn't included as an option.
+SearXNG and Marginalia are open-source and can also be self-hosted.
 
 **Tracking parameter removal**
 
