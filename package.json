@@ -1,5 +1,5 @@
 {
-  "name": "minibrowser",
+  "name": "brisk",
   "version": "0.1.0",
   "description": "A minimal Chromium-based web browser built with Electron",
   "main": "main.js",

@@ -354,7 +354,7 @@ If you want more control, you can run your own instance using Docker:
 docker run -d -p 8888:8080 searxng/searxng
 ```
 
-Then enter the following address in MiniBrowser's SearXNG instance field:
+Then enter the following address in Brisk's SearXNG instance field:
 
 ```text
 http://localhost:8888

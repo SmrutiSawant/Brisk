@@ -1,6 +1,6 @@
 # Browser different from Chrome
 
-MiniBrowser doesn't feel like Chrome because it uses Chromium. It feels like
+Brisk doesn't feel like Chrome because it uses Chromium. It feels like
 Chrome because it was **styled as a Chrome replica**. Look at `index.html`:
 
 ```css
@@ -141,7 +141,7 @@ someone "improves" either one:
   build) are stripped. The low-entropy three (`sec-ch-ua`, `-mobile`,
   `-platform`) are deliberately **kept**, because everyone sends them — removing
   them is itself a rare signal.
-- **User agent.** The `MiniBrowser/0.1.0 Electron/32` tokens are *removed*, which
+- **User agent.** The `Brisk/0.1.0 Electron/32` tokens are *removed*, which
   looks like spoofing and is the opposite. Spoofing invents a UA that contradicts
   how the engine behaves, and the contradiction narrows you down. Removing those
   tokens makes us present as the plain Chromium we actually are, which is the

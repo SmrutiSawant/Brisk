@@ -671,7 +671,7 @@ function configureDns(app, settings) {
 // ===========================================================================
 // User agent
 // ===========================================================================
-// Electron's default UA announces "MiniBrowser/0.1.0 Electron/32.0.0", which
+// Electron's default UA announces "Brisk/0.1.0 Electron/32.0.0", which
 // is a near-unique fingerprint — almost nobody else on the web sends it — and
 // also trips server-side sniffing that has never heard of us.
 //
@@ -683,6 +683,7 @@ function configureDns(app, settings) {
 // the web rather than standing outside it.
 function neutralUserAgent(app) {
   return app.userAgentFallback
+    .replace(/\s?Brisk\/\S+/i, '')
     .replace(/\s?MiniBrowser\/\S+/i, '')
     .replace(/\s?Electron\/\S+/i, '')
     .trim();

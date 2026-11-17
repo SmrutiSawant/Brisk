@@ -1,4 +1,4 @@
-// extensions.js — Extension management for MiniBrowser.
+// extensions.js — Extension management for Brisk.
 // Handles loading unpacked extensions, persistence, and exposing
 // extension details (icons, popups, options) to the browser UI.
 

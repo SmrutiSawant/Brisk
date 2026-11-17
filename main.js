@@ -38,7 +38,7 @@ applyCommandLineSwitches(app, { isWindows });
 app.enableSandbox();
 
 // Present as the plain Chromium we are, rather than announcing
-// "MiniBrowser/0.1.0 Electron/32". See the note in privacy.js on why this is
+// "Brisk/0.1.0 Electron/32". See the note in privacy.js on why this is
 // the opposite of user-agent spoofing.
 app.userAgentFallback = neutralUserAgent(app);
 
@@ -367,7 +367,7 @@ function createWindow() {
     height: workArea.height,
     minWidth: 640,
     minHeight: 400,
-    title: 'MiniBrowser',
+    title: 'Brisk',
     backgroundColor: '#f7f7f7',  // matches body — prevents a flash on open
     autoHideMenuBar: true,
 
