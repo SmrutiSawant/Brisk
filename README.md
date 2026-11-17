@@ -1,355 +1,366 @@
-# MiniBrowser
+# Brisk
 
-A minimal Chromium-based web browser, built with Electron.
+A lightweight, privacy-focused web browser built with Electron and Chromium.
 
-Chromium renders the pages; everything around them is ours. Blocks ads and
-trackers by default, encrypts DNS, upgrades every site to HTTPS, refuses
-third-party cookies, denies device permissions until you say otherwise, and is
-styled in light monochrome so it looks nothing like Chrome.
+Brisk uses Chromium to render web pages, while the browser interface and privacy features are built from scratch. It blocks ads and trackers, uses encrypted DNS, upgrades connections to HTTPS, blocks third-party cookies, and keeps device permissions disabled unless you explicitly allow them.
 
-Every one of those defaults is strict, and every one is switchable from the
-shield in the toolbar. That combination is the whole design: a default you
-can't see or undo isn't a protection, it's an opinion.
+The interface follows a simple light, monochrome design to give it a different feel from browsers like Chrome.
 
-See [ROADMAP.md](ROADMAP.md) for what's planned and why.
+All privacy protections are enabled by default, but you can change them whenever you want from the shield icon in the toolbar. The idea is simple: privacy settings should be easy to understand and control, not hidden away somewhere in the browser.
 
-## Run it
-Open **PowerShell** (or Command Prompt) in this folder:
 
-```
+## Getting Started
+
+Open PowerShell or Command Prompt in the project directory and run:
+
+```bash
 cd C:\Browser
 npm install
 npm start
 ```
 
-The first `npm install` downloads Chromium (~200 MB) and takes a few minutes.
-After that, `npm start` launches instantly.
+The first installation downloads Electron and its Chromium binaries (around 200 MB), so it may take a few minutes. Once everything is installed, you can launch the browser using `npm start`.
 
-## Why not WSL
+## Running on Windows vs WSL
 
-Electron installed from WSL is a **Linux** app. It draws through WSLg, a
-compatibility layer, which breaks things in ways that look like bugs in this
-code but aren't:
+Brisk is designed to run on Windows. Although it can also run through WSL, some Electron features behave differently because WSL uses WSLg to display Linux applications.
 
-| Symptom | Cause under WSL |
+A few issues you might encounter when running through WSL:
+
+| Issue | Reason |
 |---|---|
-| Window won't fill the screen | WSLg reports its own virtual display, not your real monitor |
-| Choppy dragging, steppy scrolling | `GPU process exited unexpectedly` — no hardware acceleration |
-| Window buttons missing or dead | `titleBarOverlay` is a Windows-only API; it does nothing on Linux |
+| Window doesn't fill the screen properly | WSLg uses a virtual display instead of directly accessing your monitor |
+| Scrolling and dragging feel choppy | Hardware acceleration may not work correctly |
+| Window controls don't appear or respond | `titleBarOverlay` is a Windows-specific Electron feature |
 
-The code now detects this and keeps the normal title bar on non-Windows, so it
-stays usable either way — but for the real thing, run it from Windows.
+The application detects the operating system and uses the regular title bar on Linux to avoid some of these issues. However, running it directly on Windows gives you the intended experience.
 
-**Switching from WSL to Windows:** `node_modules` holds Linux binaries and
-can't be reused. Delete it first, then reinstall from PowerShell:
+**Moving from WSL to Windows**
 
-```
+If you've already installed dependencies through WSL, delete the existing `node_modules` folder before reinstalling. It contains Linux-specific binaries that won't work on Windows.
+
+Run the following commands in PowerShell:
+
+```powershell
 rmdir /s /q node_modules
 npm install
 npm start
 ```
 
-This needs Node.js installed on Windows itself (<https://nodejs.org>) — having
-it inside WSL isn't enough.
+Make sure Node.js is installed on Windows itself. A Node.js installation inside WSL cannot be used by PowerShell.
 
-## What works
+## Features
 
-**Privacy defaults**
+### Privacy and Tracking Protection
 
-- **Ad and tracker blocking, on by default.** Real EasyList + EasyPrivacy rules
-  via `@ghostery/adblocker-electron` — the same lists uBlock Origin uses. The
-  toolbar shows a live count of what was blocked on the current page.
-- **Open source search by default.** The picker beside the address bar switches
-  between three engines, and the choice persists:
+**Ad and tracker blocking**
 
-  | Engine | Licence | Good for |
-  |---|---|---|
-  | **SearXNG** (default) | AGPL | General search. A metasearch engine — it fans your query out to ~270 upstreams and merges the results, so no single one builds a profile of you. |
-  | **Marginalia** | AGPL | Finding actual writing. Its own crawler and index, tuned for text-heavy non-commercial pages. Superb for essays and old web; useless for weather or opening hours. |
-  | **DuckDuckGo** | Proprietary | The reliable fallback. 
-  
-  Both open-source options can be self-hosted. Google isn't in the list.
-- **Tracking parameters stripped** from URLs you navigate to — `utm_*`,
-  `fbclid`, `gclid`, `msclkid`, `igshid`, `mc_eid` and ~25 more. They tell the
-  sender who clicked and change nothing about the page you get.
+Brisk uses `@ghostery/adblocker-electron` with EasyList and EasyPrivacy filters to block ads and trackers automatically. The toolbar also displays how many requests have been blocked on the current page.
 
-**Protecting your data**
+**Search engines**
 
-All of this lives in `privacy.js`, and all of it is reversible from the shield
-button in the toolbar.
+Instead of relying on Google, Brisk provides three search engine options:
 
-*On the wire*
-
-| Measure | What it stops |
+| Search engine | What it's useful for |
 |---|---|
-| **HTTPS-only**, with a per-site fallback you have to choose | Anyone between you and the site reading or rewriting the page. If a site genuinely has no HTTPS you get a bar offering the choice, not a dead end |
-| **Encrypted DNS** (DoH, Quad9 by default, `secure` mode) | Your ISP and the local network seeing every hostname you visit — which plain DNS leaks even when the page itself is encrypted |
-| **Third-party cookies blocked**, request and response | The mechanism behind cross-site tracking: one embedded network reading the same cookie on a thousand sites |
-| **Cross-site referrers trimmed to the origin** | Other sites learning *which page* you came from — often the search you ran. Same-site referrers are untouched, so anti-CSRF checks still work |
-| **`Sec-GPC: 1` sent** | Legally binding opt-out of data sale under California and Colorado law |
-| **`X-Client-Data` stripped** | A stable, high-entropy identifier Chromium attaches to every request to a Google domain |
-| **High-entropy Client Hints stripped** | Your exact CPU architecture, device model and OS build. The low-entropy three are kept deliberately — see below |
-| **`NEL` / `Report-To` stripped** | Sites collecting telemetry about your own network conditions and failures |
-| **WebRTC restricted to the public interface** | The classic leak where a page reads your LAN address straight through a VPN |
-| **`<a ping>` disabled, background networking off** | Click-reporting beacons, variations fetches, domain-reliability reports, component updates |
-| **Privacy Sandbox off** | Topics, FLEDGE, Attribution Reporting and Shared Storage — Google's replacement for third-party cookies, which relocates the profiling into the browser rather than removing it |
+| SearXNG (default) | General-purpose search using results from multiple search engines |
+| Marginalia | Finding blogs, essays, independent websites, and text-heavy content |
+| DuckDuckGo | A reliable alternative for everyday searches |
 
-*On the machine*
+The selected search engine is saved, so you don't have to choose it every time you open the browser.
 
-- **Device permissions default-deny.** Location, camera, microphone, screen
-  share, clipboard reading, MIDI, USB, HID, serial, Bluetooth, idle detection.
-  Denied *silently* — no modal — with a dot on the shield when a site asked, so
-  the answer is there when you want it and invisible when you don't. Grant
-  per-site from the panel.
-- **Private tabs** (`Ctrl+Shift+N`) on their own partition: separate cookie
-  jar, separate storage, never in the reopen list, wiped when the app closes.
-- **Executable downloads warn before writing to disk**, and downloads always
-  ask where to save.
-- **Clear-on-exit** and an immediate **Clear browsing data** (`Ctrl+Shift+Del`).
-- **Certificates are never silently accepted** — a bad cert on a page you typed
-  is the exact shape of an interception attempt.
+SearXNG and Marginalia are open-source and can also be self-hosted. Google isn't included as an option.
 
-*Against the browser itself*
+**Tracking parameter removal**
 
-Every tab is a hostile document until proven otherwise.
+When you navigate to a URL, Brisk removes common tracking parameters such as `utm_*`, `fbclid`, `gclid`, `msclkid`, `igshid`, and others.
 
-- All renderers sandboxed (`app.enableSandbox()`); guest pages get **no
-  preload**, no Node, and context isolation.
-- `will-attach-webview` **overwrites** the webPreferences a `<webview>` tag
-  asks for, so markup can never request Node integration.
-- Navigation is scheme-allowlisted: `javascript:` and top-level `data:` URLs —
-  the classic phishing vectors — are refused, and `file:` is limited to the new
-  tab page.
-- Our own UI can't navigate anywhere, can't open windows, and runs under a CSP
-  with no `script-src 'unsafe-inline'`.
-- Every IPC handler validates its sender; every setting is re-validated in the
-  main process, so a hand-edited `settings.json` can't inject state.
+These parameters are often used to track where a visitor came from. Removing them usually doesn't affect the page itself.
 
-**What is deliberately *not* done: fingerprinting resistance.** No spoofed user
-agent, no randomised canvas. Naive defences make you *more* identifiable,
-because the inconsistency is itself a signal — a UA claiming Firefox from an
-engine that behaves like Chromium is rarer than either. This is also why the
-low-entropy Client Hints are left alone while the high-entropy ones are
-stripped: the first three are sent by everyone, so removing them would single
-you out. The one related change made is *removing* the `MiniBrowser/0.1.0
-Electron/32` tokens from the user agent — that's joining the largest crowd on
-the web rather than standing outside it, which is the opposite of spoofing.
-Tor Browser solves fingerprinting properly by making every user identical.
-That's years of work; don't half-do it.
+### Network Privacy
 
-**Browsing**
+The browser applies several protections to reduce the amount of information websites and network providers can collect.
 
-- Custom new tab page — clock, greeting, search box, quick links. Local, so launch is instant and offline.
-- Multiple tabs — new, close, switch, middle-click to close
-- Address bar that tells URLs from search queries (`github.com` navigates, `how do browsers work` searches)
-- Back / forward / reload / stop / home
-- Live page titles and favicons in the tab strip, loading spinner
-- `target="_blank"` links open in a new tab instead of a popup window
-- Shortcuts, working everywhere — including with focus inside a page:
-  `Ctrl+T` new tab, `Ctrl+Shift+N` new **private** tab,
-  `Ctrl+Shift+T` reopen closed tab, `Ctrl+W` close,
-  `Ctrl+L` address bar, `Ctrl+R` reload, `Ctrl+Shift+R` hard reload,
-  `Ctrl+Tab` / `Ctrl+Shift+Tab` cycle tabs, `Alt+←/→` history,
-  `Ctrl+Shift+Del` clear browsing data, `F11` fullscreen, `F12` devtools
-- `F12` opens devtools for whatever has focus — the browser UI or the page inside a tab
-- No OS title bar — window buttons sit in the tab strip, and the strip's empty space drags the window
-- Light monochrome UI, rounded pill tabs, and the page floating inside an 8px gutter
-
-## How it fits together
-
-| File | Role |
+| Protection | Purpose |
 |---|---|
-| `main.js` | Electron main process. Owns the OS window; blocks ads; intercepts popups; enforces the `<webview>` boundary; rescues keyboard shortcuts from pages. |
-| `privacy.js` | Everything that touches user data: session hardening, header scrubbing, permissions, HTTPS-only, downloads, DNS, Chromium switches. |
-| `preload.js` | The one safe bridge from main → UI. Nothing else crosses. |
-| `index.html` | The browser "chrome" — tab strip, toolbar, privacy panel, styling. |
-| `renderer.js` | Tab management, URL parsing, navigation, shortcuts, the privacy panel. |
-| `newtab.html` | The new tab page. |
-| `newtab.js` | Its behaviour — separate so the page can forbid inline script. Edit `LINKS` to change the tiles. |
-| `ROADMAP.md` | Where this goes next, and what each step costs. |
+| HTTPS-only navigation | Tries to use secure connections for every website. If HTTPS isn't available, you can choose whether to continue using an insecure connection |
+| Encrypted DNS | Uses DNS over HTTPS (Quad9 by default) so your ISP and local network cannot easily see the domains you're looking up through ordinary DNS |
+| Third-party cookies blocked | Prevents embedded third-party services from using cookies to track you across websites |
+| Referrer restrictions | Sends only the website's origin when navigating between different sites, instead of revealing the complete page URL |
+| Global Privacy Control | Sends `Sec-GPC: 1` to communicate your preference against the sale or sharing of personal data |
+| Client data removal | Removes Chromium's `X-Client-Data` header from Google requests |
+| Client Hints restrictions | Removes high-entropy browser information, such as detailed device and OS information, while keeping commonly shared low-entropy hints |
+| Network reporting disabled | Removes `NEL` and `Report-To` headers to limit network telemetry |
+| WebRTC restrictions | Restricts WebRTC to the public network interface to reduce local IP address leaks |
+| Background networking disabled | Disables features such as link click reporting and unnecessary background requests |
+| Privacy Sandbox disabled | Turns off features such as Topics, FLEDGE, Attribution Reporting, and Shared Storage |
 
-`main.js` owns the *window*; `privacy.js` owns the *sessions*. Splitting them
-that way means the entire privacy posture of the browser is readable in one
-sitting instead of scattered through window management.
+### Device and Local Privacy
 
-The key idea: **you are not writing a rendering engine.** Each tab is a
-`<webview>` element, which Electron backs with a full, sandboxed Chromium
-renderer process. Your code is the frame around it — which is exactly the
-relationship Brave, Arc, and Edge have with Chromium.
+- **Device permissions:** Location, camera, microphone, screen sharing, clipboard reading, Bluetooth, USB, MIDI, and other device permissions are denied by default. If a website requests access, a small indicator appears on the shield icon. You can review the request and grant permission to individual sites from there.
+- **Private browsing:** Press `Ctrl+Shift+N` to open a private tab. Private tabs use a separate storage partition with their own cookies and website data. They aren't included in the reopen-closed-tabs list, and their data is cleared when the browser closes.
+- **Download protection:** Executable files trigger a warning before being downloaded. The browser also asks where you want to save every download.
+- **Browsing data:** You can clear browsing data whenever you want using `Ctrl+Shift+Del`. The browser also clears configured data when it exits.
+- **Certificate validation:** Websites with invalid certificates are not silently accepted. This helps prevent situations where someone might be intercepting your connection.
 
-## Not implemented yet
+### Browser Security
 
-Deliberately left out to keep this readable:
+A key part of Brisk's design is treating every website as untrusted content.
 
-- Bookmarks and history (needs persistent storage — `electron-store` is the easy path)
-- Downloads *UI* — the safety guard exists in `privacy.js`, but there's no
-  panel listing what you've downloaded
-- Find-in-page, zoom
-- Tab drag-to-reorder
-- Per-site containers beyond the single private partition
+To keep website code separate from the browser itself:
 
-## Two numbers that must stay in sync
+- Renderer processes run with sandboxing enabled.
+- Websites don't get access to Node.js or the browser's preload scripts.
+- Context isolation is enabled.
+- Webview preferences are controlled by the main process rather than being trusted from page markup.
+- Navigation is restricted to allowed URL schemes. Dangerous `javascript:` and top-level `data:` navigations are blocked.
+- Local `file:` navigation is restricted to the new tab page.
+- The browser's own interface runs with a Content Security Policy that doesn't allow inline scripts.
+- Websites cannot open arbitrary browser windows.
+- IPC messages are checked to make sure they come from the expected sender.
+- Settings are validated in the main process before being saved or applied.
 
-`titleBarOverlay` in `main.js` sets the colour and height of the native window
-buttons. Both have to match `#tabstrip` in `index.html` — `#e6e6e6` and `40px`
-— or the buttons sit on a mismatched strip. Its `symbolColor` (`#111111`) has
-to match `--text`. Change one, change the other.
+These checks help prevent a website or a modified settings file from gaining access to parts of the browser it shouldn't be able to control.
 
-`backgroundColor` on the window should match `body` (`--toolbar-bg`, `#f7f7f7`),
-which is what shows in the gutter around the floating page. And `nativeTheme
-.themeSource` is pinned to `'light'` so sites that honour `prefers-color-scheme`
-match the frame — set it to `'system'` if you'd rather follow the OS.
+### A Note on Browser Fingerprinting
 
-The strip's `padding-right: 148px` reserves space for those buttons. Shrink it
-and your tabs slide underneath them.
+Brisk deliberately doesn't try to randomize browser fingerprints.
 
-## Why SearXNG sometimes returns nothing
+Changing the user agent, randomizing canvas output, or pretending to be a different browser can sometimes make a browser easier to identify rather than harder. For example, claiming to be Firefox while actually behaving like Chromium creates an unusual combination of signals.
 
-SearXNG has no index of its own. It relays your query to Google, Bing and
-others and merges what comes back — which is exactly what makes it private, and
-also its weak point. Those upstreams block datacenter IPs hard. A popular public
-instance gets scraped by bots until every upstream has blocked it, and from then
-on it answers every query with **"No results were found."** The instance is up.
-It simply has nothing left to relay.
+Instead, Brisk keeps commonly shared browser information consistent and removes unnecessary identifying details.
 
-This is a property of public instances, not a bug here, and it is why the
-instance is editable from the toolbar: open the engine picker, and under SearXNG
-there's a field and a row of quick picks. The choice is saved.
+It also removes the `Brisk/0.1.0 Electron/32` tokens from the user agent so websites don't immediately identify it as this particular application.
 
-Counter-intuitively, **an instance that makes you pass a browser check is
-usually the better bet.** That check is what protects its upstream quota, and a
-real browser clears it in a second or two. An instance that lets anything
-straight through is often one whose upstreams have already given up on it.
+Proper fingerprinting protection, like the approach used by Tor Browser, requires much more extensive work to make users appear similar to one another. Brisk doesn't claim to solve that problem.
 
-The real fix is self-hosting — your own IP, your own quota, no one else's bot
-traffic. `docker run -d -p 8888:8080 searxng/searxng`, then paste
-`http://localhost:8888` into the instance field. That address is explicitly
-allowed; the field accepts `localhost` and bare IPs as well as public hostnames.
+## Browsing Experience
 
-More instances at <https://searx.space>.
+Brisk includes the basic features you'd expect from a desktop browser:
 
-Marginalia is unaffected by all of this — it runs its own crawler and index.
-Note that it takes its query in `query=`, not `q=`, which is why the new tab
-page rewrites the form's field name and not just its action.
+- A custom new tab page with a clock, greeting, search box, and quick links.
+- Multiple tabs with support for opening, closing, and switching between them.
+- Middle-click to close a tab.
+- An address bar that distinguishes between URLs and search queries.
+- Back, forward, reload, stop, and home controls.
+- Live page titles and favicons in the tab strip.
+- Loading indicators for active tabs.
+- Links using `target="_blank"` open in a new tab.
+- A minimal light interface with rounded tabs and a floating page layout.
+- Custom window controls integrated into the tab strip.
 
-## Settings
+### Keyboard Shortcuts
 
-One JSON file at `settings.json` in Electron's `userData` directory, read at
-startup and written on change. No dependency: `electron-store` is ESM-only from
-v11 and this project is CommonJS.
+Shortcuts work even when you're interacting with a website inside a tab.
 
-Every key has an entry in `VALIDATORS` in `main.js` and is checked on the way
-in — both when the file is loaded and on every write from the UI. A key that
-fails validation falls back to its default rather than being stored. So a
-hand-edited or corrupted file can't inject state the rest of the app then
-trusts, and the renderer can't talk main into storing something malformed.
+| Shortcut | Action |
+|---|---|
+| `Ctrl+T` | Open a new tab |
+| `Ctrl+Shift+N` | Open a private tab |
+| `Ctrl+Shift+T` | Reopen the last closed tab |
+| `Ctrl+W` | Close current tab |
+| `Ctrl+L` | Focus the address bar |
+| `Ctrl+R` | Reload page |
+| `Ctrl+Shift+R` | Hard reload |
+| `Ctrl+Tab` | Switch to next tab |
+| `Ctrl+Shift+Tab` | Switch to previous tab |
+| `Alt+Left / Right` | Navigate back / forward |
+| `Ctrl+Shift+Del` | Clear browsing data |
+| `F11` | Toggle fullscreen |
+| `F12` | Open DevTools |
 
-If you add a setting, add it to **both** `DEFAULT_SETTINGS` and `VALIDATORS`.
-A key with no validator is silently ignored on every write, which looks exactly
-like a broken toggle.
+F12 works for both the browser interface and the currently focused website.
 
-## Two invariants across files
+## Project Structure
 
-Alongside the colour values below, two names have to match in two places:
+The project is split into a few main files, with each one handling a specific part of the browser.
 
-- `PRIVATE_PARTITION` — `main.js` accepts exactly one partition string in
-  `will-attach-webview`, and `renderer.js` sets it on private tabs. If they
-  drift, private tabs silently land in the ordinary, persistent cookie jar and
-  look identical.
-- `NO_HTTPS_ERRORS` — the Chromium error codes that mean "this site has no
-  HTTPS" rather than "you're offline". Both processes decide whether to offer
-  the insecure fallback, so both need the same list.
+| File | Responsibility |
+|---|---|
+| `main.js` | Creates the application window, manages webviews, handles IPC, keyboard shortcuts, and popup restrictions |
+| `privacy.js` | Handles privacy settings, session security, request headers, permissions, HTTPS enforcement, DNS, and downloads |
+| `preload.js` | Provides a limited and secure bridge between the main process and browser interface |
+| `index.html` | Contains the browser interface, including the tab strip, toolbar, privacy panel, and styling |
+| `renderer.js` | Handles tabs, navigation, URL parsing, keyboard shortcuts, and the privacy panel |
+| `newtab.html` | Defines the custom new tab page |
+| `newtab.js` | Handles new tab functionality and quick links |
+| `ROADMAP.md` | Lists planned features and future improvements |
 
-## Shortcuts live in two places on purpose
+One important design decision is keeping `main.js` and `privacy.js` separate. The main process manages the application window and browser behaviour, while `privacy.js` contains the logic responsible for protecting browsing sessions and user data.
 
-A `<webview>` is a separate renderer process, so keys pressed inside a page
-never reach the `window` listener in `renderer.js`. That's why shortcuts used
-to stop working the moment you clicked into a page.
+This makes the privacy-related code easier to find, review, and maintain.
 
-`before-input-event` in `main.js` fires for whichever webContents has focus, so
-it catches them all. It forwards the *intent* — `{ action: 'new-tab' }` — over
-IPC, and `runAction` in `renderer.js` executes it. Both the window listener and
-the IPC path go through that one table, so they can't drift apart.
+## What's Not Implemented Yet
 
-Two things to keep right if you add a shortcut:
+Some features have been left out to keep the initial version manageable.
 
-- **Add it to both `matchShortcut` in `main.js` and `shortcutFor` in
-  `renderer.js`.** They must agree, or a shortcut works in one focus context
-  and not the other.
-- **Main only forwards for `contents.getType() === 'webview'`.** When our own
-  UI has focus, the window listener already handles it; forwarding from both
-  would run every shortcut twice — two tabs opened, two closed.
+- Bookmarks and browsing history.
+- A downloads panel to view and manage downloaded files.
+- Find-in-page.
+- Page zoom controls.
+- Drag-and-drop tab reordering.
+- Additional per-site browsing containers.
 
-If an action needs to type into our UI, add it to `FOCUS_UI` in `main.js` so
-the window is focused before the message is sent.
+These can be added in future iterations. Persistent storage, for example, could be handled using `electron-store` or another suitable storage solution.
 
-## Only one webRequest listener per session
+## Things to Keep in Mind When Making Changes
 
-Electron allows exactly **one** listener per `webRequest` event per session.
-Registering a second silently replaces the first — no error, no warning, the
-first one just stops running.
+A few parts of the application depend on matching values or behaviour across multiple files. If you're modifying these areas, make sure the related code is updated as well.
 
-The ad blocker claims **two** of them:
+### Window Colours and Dimensions
 
-| Event | Owner | Rule |
-|---|---|---|
-| `onBeforeRequest` | the blocker | Never touch it. |
-| `onHeadersReceived` | the blocker, then us | We re-register, but we **chain**. |
-| `onBeforeSendHeaders` | us | Unclaimed by the blocker. |
+The following values need to stay consistent:
 
-The chaining is the interesting part. `blocker.onHeadersReceived` is a public
-method on `ElectronBlocker`, so `installHeaderPipeline()` in `privacy.js`
-registers a listener that calls the blocker's handler first and then edits
-whatever it hands back. Both survive: the blocker's `$csp` filter injection
-*and* our `Set-Cookie` stripping. Replace it without chaining and you lose the
-blocker's half with nothing to tell you.
+- `titleBarOverlay` in `main.js` should match the tab strip background (`#e6e6e6`) and height (`40px`) in `index.html`.
+- Its `symbolColor` (`#111111`) should match the `--text` CSS variable.
+- The window's `backgroundColor` should match the page gutter colour (`#f7f7f7`).
+- `nativeTheme.themeSource` is set to `light`. Change it to `system` if you want the browser to follow the operating system's theme.
+- The tab strip uses `padding-right: 148px` to leave space for the native window controls.
 
-Because the blocker loads asynchronously, the order matters:
+Changing one of these values without updating the others can make the interface look inconsistent.
 
-1. The session is hardened at startup with no blocker attached.
-2. The blocker finishes downloading and calls `enableBlockingInSession()`,
-   which replaces our `onHeadersReceived`.
-3. `main.js` immediately calls `installHeaderPipeline()` again, this time
-   passing the blocker, so ours is reinstated *on top of* it.
+### Settings Validation
 
-Skip step 3 and third-party `Set-Cookie` stripping silently stops. It's the
-first thing to check if a protection seems to have evaporated.
+All browser settings are stored in `settings.json` inside Electron's `userData` directory.
 
-Tracking-parameter stripping stays in `renderer.js` for the same reason it
-always did: the `onBeforeRequest` redirect where it would otherwise belong is
-the blocker's.
+Settings are loaded when the application starts and saved whenever something changes. Each setting is checked against its corresponding validator in `main.js`.
 
-## HTTPS-only lives in two processes, and it has to
+If a setting doesn't pass validation, the browser uses its default value instead.
 
-`will-navigate` — where `main.js` guards navigation — **does not fire for
-navigations started programmatically**. Every navigation *we* start is
-programmatic: `view.loadURL()` from the omnibox, and setting a webview's `src`
-when a tab is created.
+Whenever you add a new setting, update both:
 
-So the upgrade is implemented twice, on purpose:
+- `DEFAULT_SETTINGS`
+- `VALIDATORS`
 
-- **`main.js`** handles what *pages* do — link clicks, redirects,
-  `window.location`.
-- **`renderer.js`** handles what the *user* does — the omnibox, new tabs.
+If you forget to add a validator, the setting won't be accepted when the UI tries to save it.
 
-Miss either half and the upgrade quietly applies to only some navigations,
-which is worse than not having it, because the padlock still looks right.
+### Private Browsing Configuration
 
-The same split applies to the exceptions list: clicking "Continue anyway" adds
-the host to a session-scoped set in *both* processes, from the one click, so
-they can't drift.
+The `PRIVATE_PARTITION` value must match between `main.js` and `renderer.js`.
 
-## Gotcha worth knowing
+The main process checks which partition a webview is allowed to use, while the renderer assigns the partition when creating a private tab.
 
-Do **not** set `display: none` on a `<webview>` to hide it. Electron relies on
-`display: flex` internally to size the guest page, and overriding it causes
-layout to misbehave. That's why each tab is wrapped in a `.view-wrap` div and
-the wrapper is what gets toggled. It's the first thing to check if the UI ever
-looks wrong.
+If these values don't match, private tabs may accidentally use the regular persistent session instead.
 
-## Known trade-off: `<webview>` vs `WebContentsView`
+### HTTPS Error Handling
 
-This uses `<webview>`, which keeps tab management to a handful of DOM calls.
-Electron's team recommends `WebContentsView` instead — it's faster and better
-supported, but tabs then live in the main process and you have to position and
-resize each one by hand. Worth migrating to if this grows past a prototype.
+`NO_HTTPS_ERRORS` is another value that needs to stay consistent across both processes.
+
+Both `main.js` and `renderer.js` use this list to distinguish websites that genuinely don't support HTTPS from other network errors, such as being offline.
+
+If you update the list in one place, make sure to update the other too.
+
+### Keyboard Shortcuts
+
+Keyboard shortcuts are handled in two places because website tabs run in separate renderer processes.
+
+- `before-input-event` in `main.js` catches keyboard input from the currently focused webview.
+- The window keyboard listener in `renderer.js` handles shortcuts when the browser interface has focus.
+
+Both paths use the same `runAction` logic to perform the actual action.
+
+When adding a shortcut, update:
+
+- `matchShortcut` in `main.js`
+- `shortcutFor` in `renderer.js`
+
+Also, if an action needs to interact with the browser UI, add it to `FOCUS_UI` in `main.js` so the application window receives focus first.
+
+The main process only forwards shortcuts when the focused webContents is a webview. This prevents shortcuts from being executed twice when the browser interface already has focus.
+
+### Ad Blocker and Request Listeners
+
+Electron allows only one listener per `webRequest` event for each session. Registering another listener for the same event replaces the previous one.
+
+This matters because the ad blocker already uses some of these events.
+
+The current setup is:
+
+| Event | Handler |
+|---|---|
+| `onBeforeRequest` | Ad blocker |
+| `onHeadersReceived` | Ad blocker and our privacy pipeline |
+| `onBeforeSendHeaders` | Our privacy pipeline |
+
+The `onHeadersReceived` event needs special handling. Our `installHeaderPipeline()` function calls the blocker's existing handler first, then applies our own header modifications.
+
+This allows both the ad blocker's CSP changes and our third-party cookie restrictions to work together.
+
+There's also an important startup detail:
+
+1. The session is configured with its privacy settings.
+2. The ad blocker loads asynchronously and registers its listeners.
+3. Once it finishes loading, `installHeaderPipeline()` is called again with the blocker instance.
+
+This restores our header pipeline on top of the blocker's handler.
+
+If the third-party cookie restrictions suddenly stop working, this is one of the first places to check.
+
+Tracking parameter removal is handled separately in `renderer.js` because the ad blocker already owns the `onBeforeRequest` event.
+
+### HTTPS Enforcement
+
+HTTPS enforcement is implemented in both `main.js` and `renderer.js`.
+
+This is intentional because Electron's `will-navigate` event doesn't cover every navigation started programmatically.
+
+- `main.js` handles navigation initiated by websites, such as link clicks and redirects.
+- `renderer.js` handles navigation initiated by the user, such as entering a URL in the address bar or opening a new tab.
+
+Both processes also maintain the HTTPS exception list. When a user chooses to continue to a site without HTTPS, the exception is added to both lists.
+
+Keeping these two paths in sync ensures that HTTPS protection works regardless of how a page is opened.
+
+### Webview Visibility
+
+Avoid setting `display: none` directly on a `<webview>` element.
+
+Electron relies on the webview's layout behaviour to size the guest page correctly. Hiding it this way can cause rendering and sizing problems.
+
+Instead, each webview is placed inside a `.view-wrap` container, and the container's visibility is changed when switching tabs.
+
+## Known Trade-off: Webview vs WebContentsView
+
+Brisk currently uses Electron's `<webview>` element because it makes tab management relatively straightforward.
+
+Electron recommends considering `WebContentsView` for applications that need more control over embedded content.
+
+With `WebContentsView`, tab management and positioning have to be handled from the main process, including manually updating the position and size of each view.
+
+For now, `<webview>` keeps the implementation simpler. Moving to `WebContentsView` is something worth considering if the project grows further.
+
+## SearXNG Troubleshooting
+
+Sometimes SearXNG may return:
+
+**"No results were found."**
+
+This doesn't necessarily mean the instance is offline.
+
+SearXNG works by forwarding searches to other search engines and combining their results. Public instances often run into problems when upstream providers block their requests, especially when the instance receives a lot of automated traffic.
+
+When that happens, the instance may still be accessible but unable to retrieve search results.
+
+Brisk lets you change the SearXNG instance directly from the search engine picker in the toolbar. You can enter another instance or select one of the available suggestions. Your selection is saved.
+
+You can find other public instances at [searx.space](https://searx.space).
+
+**Running your own SearXNG instance**
+
+If you want more control, you can run your own instance using Docker:
+
+```bash
+docker run -d -p 8888:8080 searxng/searxng
+```
+
+Then enter the following address in MiniBrowser's SearXNG instance field:
+
+```text
+http://localhost:8888
+```
+
+The instance field allows localhost addresses and bare IP addresses, in addition to public hostnames.
+
+Marginalia isn't affected by the same issue because it maintains its own crawler and search index.
+
+One small implementation detail: Marginalia expects the search parameter to be `query=` rather than `q=`. That's why the new tab page updates the form's field name as well as its action URL.
