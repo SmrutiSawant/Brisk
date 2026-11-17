@@ -162,6 +162,10 @@ const homeBtn    = document.getElementById('home');
 const newTabBtn  = document.getElementById('newtab');
 
 const panelEl        = document.getElementById('privacypanel');
+const extToolbarEl   = document.getElementById('exttoolbar');
+const extBtnEl       = document.getElementById('extbtn');
+const extCountEl     = document.getElementById('extcount');
+const extPanelEl     = document.getElementById('extensionspanel');
 const insecureBar    = document.getElementById('insecurebar');
 const insecureDetail = document.getElementById('insecuredetail');
 const insecureBack   = document.getElementById('insecureback');
@@ -286,7 +290,7 @@ const originalHttpFor = (url) => upgradedFrom.get(url) || null;
 // Schemes a tab may be pointed at. Mirrors ALLOWED_SCHEMES in main.js — main
 // is the enforcement, this is so the omnibox refuses rather than silently
 // doing nothing when you paste `javascript:` or a `data:` URL.
-const OMNIBOX_SCHEMES = new Set(['https:', 'http:', 'about:', 'blob:', 'file:']);
+const OMNIBOX_SCHEMES = new Set(['https:', 'http:', 'about:', 'blob:', 'file:', 'chrome-extension:']);
 
 function schemeAllowed(url) {
   if (url.startsWith(NEWTAB)) return true;
@@ -861,6 +865,8 @@ function closeEngineMenu() { engineMenu.classList.remove('open'); }
 
 engineBtn.addEventListener('click', (e) => {
   e.stopPropagation();          // don't let the window handler close it again
+  closePrivacyPanel();
+  closeExtensionsPanel();
   engineMenu.classList.toggle('open');
 });
 
@@ -1191,6 +1197,7 @@ function closePrivacyPanel() {
 shieldEl.addEventListener('click', (e) => {
   e.stopPropagation();
   closeEngineMenu();
+  closeExtensionsPanel();
   const opening = !panelEl.classList.contains('open');
   panelEl.classList.toggle('open', opening);
   if (opening) {
@@ -1205,6 +1212,260 @@ shieldEl.addEventListener('click', (e) => {
 panelEl.addEventListener('click', (e) => e.stopPropagation());
 window.addEventListener('click', closePrivacyPanel);
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePrivacyPanel(); });
+
+// ---------------------------------------------------------------------------
+// Extensions
+// ---------------------------------------------------------------------------
+let extensions = [];
+
+function closeExtensionsPanel() {
+  if (extPanelEl) extPanelEl.classList.remove('open');
+  if (extBtnEl) extBtnEl.classList.remove('active');
+}
+
+function openExtensionsPanel() {
+  closePrivacyPanel();
+  closeEngineMenu();
+  if (extPanelEl) extPanelEl.classList.add('open');
+  if (extBtnEl) extBtnEl.classList.add('active');
+  renderExtensions();
+}
+
+function renderExtensions() {
+  if (!extPanelEl || !extBtnEl || !extToolbarEl) return;
+  const count = extensions.length;
+  extCountEl.textContent = String(count);
+  extBtnEl.classList.toggle('has-extensions', count > 0);
+
+  // Pinned items in toolbar
+  extToolbarEl.textContent = '';
+  const pinned = extensions.filter((e) => e.pinned);
+  for (const ext of pinned) {
+    const btn = document.createElement('button');
+    btn.className = 'ext-pinned-btn';
+    btn.title = ext.name + (ext.version ? ` (${ext.version})` : '');
+    if (ext.icon) {
+      const img = document.createElement('img');
+      img.src = ext.icon;
+      img.alt = ext.name;
+      btn.appendChild(img);
+    } else {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      p.setAttribute(
+        'd',
+        'M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7s2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z'
+      );
+      svg.appendChild(p);
+      btn.appendChild(svg);
+    }
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (ext.popupUrl) {
+        createTab(ext.popupUrl);
+      } else if (ext.optionsUrl) {
+        createTab(ext.optionsUrl);
+      } else {
+        openExtensionsPanel();
+      }
+    });
+    extToolbarEl.appendChild(btn);
+  }
+
+  // Panel content
+  extPanelEl.textContent = '';
+
+  const head = document.createElement('div');
+  head.className = 'ext-panel-head';
+  head.innerHTML = `
+    <span class="ext-panel-title">Extensions</span>
+    <span class="ext-panel-count">${count} installed</span>
+  `;
+  extPanelEl.appendChild(head);
+
+  const errorEl = document.createElement('div');
+  errorEl.className = 'ext-error';
+  extPanelEl.appendChild(errorEl);
+
+  const listEl = document.createElement('div');
+  listEl.className = 'ext-list';
+
+  if (count === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'ext-empty';
+    empty.innerHTML = `
+      <svg viewBox="0 0 24 24"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7s2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z"/></svg>
+      <b>No extensions loaded</b>
+      <small>Load an unpacked extension directory containing <code>manifest.json</code>.</small>
+    `;
+    listEl.appendChild(empty);
+  } else {
+    for (const ext of extensions) {
+      const item = document.createElement('div');
+      item.className = 'ext-item';
+
+      const mainRow = document.createElement('div');
+      mainRow.className = 'ext-item-main';
+
+      if (ext.icon) {
+        const icon = document.createElement('img');
+        icon.className = 'ext-item-icon';
+        icon.src = ext.icon;
+        mainRow.appendChild(icon);
+      } else {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('class', 'ext-item-icon-svg');
+        const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        p.setAttribute(
+          'd',
+          'M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7s2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z'
+        );
+        svg.appendChild(p);
+        mainRow.appendChild(svg);
+      }
+
+      const details = document.createElement('div');
+      details.className = 'ext-item-details';
+
+      const nameRow = document.createElement('div');
+      nameRow.className = 'ext-item-name-row';
+
+      const name = document.createElement('span');
+      name.className = 'ext-item-name';
+      name.textContent = ext.name;
+      nameRow.appendChild(name);
+
+      const ver = document.createElement('span');
+      ver.className = 'ext-item-ver';
+      ver.textContent = `v${ext.version}`;
+      nameRow.appendChild(ver);
+
+      details.appendChild(nameRow);
+
+      if (ext.description) {
+        const desc = document.createElement('span');
+        desc.className = 'ext-item-desc';
+        desc.textContent = ext.description;
+        details.appendChild(desc);
+      }
+
+      mainRow.appendChild(details);
+      item.appendChild(mainRow);
+
+      // Actions row
+      const actions = document.createElement('div');
+      actions.className = 'ext-item-actions';
+
+      if (ext.popupUrl) {
+        const popupBtn = document.createElement('button');
+        popupBtn.className = 'ext-action-btn';
+        popupBtn.textContent = 'Popup';
+        popupBtn.title = 'Open extension popup';
+        popupBtn.addEventListener('click', () => {
+          closeExtensionsPanel();
+          createTab(ext.popupUrl);
+        });
+        actions.appendChild(popupBtn);
+      }
+
+      if (ext.optionsUrl) {
+        const optBtn = document.createElement('button');
+        optBtn.className = 'ext-action-btn';
+        optBtn.textContent = 'Options';
+        optBtn.title = 'Open extension options';
+        optBtn.addEventListener('click', () => {
+          closeExtensionsPanel();
+          createTab(ext.optionsUrl);
+        });
+        actions.appendChild(optBtn);
+      }
+
+      const pinBtn = document.createElement('button');
+      pinBtn.className = 'ext-action-btn' + (ext.pinned ? ' active' : '');
+      pinBtn.title = ext.pinned ? 'Unpin from toolbar' : 'Pin to toolbar';
+      pinBtn.innerHTML = `
+        <svg viewBox="0 0 24 24"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
+        ${ext.pinned ? 'Pinned' : 'Pin'}
+      `;
+      pinBtn.addEventListener('click', async () => {
+        if (API.togglePinExtension) {
+          const updated = await API.togglePinExtension(ext.id, !ext.pinned);
+          if (Array.isArray(updated)) {
+            extensions = updated;
+            renderExtensions();
+          }
+        }
+      });
+      actions.appendChild(pinBtn);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'ext-action-btn danger';
+      removeBtn.title = 'Remove extension';
+      removeBtn.textContent = 'Remove';
+      removeBtn.addEventListener('click', async () => {
+        if (API.removeExtension) {
+          await API.removeExtension(ext.id);
+          extensions = extensions.filter((e) => e.id !== ext.id);
+          renderExtensions();
+        }
+      });
+      actions.appendChild(removeBtn);
+
+      item.appendChild(actions);
+      listEl.appendChild(item);
+    }
+  }
+
+  extPanelEl.appendChild(listEl);
+
+  const footer = document.createElement('div');
+  footer.className = 'ext-footer';
+  const loadBtn = document.createElement('button');
+  loadBtn.id = 'load-unpacked-btn';
+  loadBtn.className = 'ext-load-btn';
+  loadBtn.innerHTML = `
+    <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+    Load unpacked extension...
+  `;
+  loadBtn.addEventListener('click', async () => {
+    errorEl.classList.remove('show');
+    errorEl.textContent = '';
+    if (API.loadUnpackedExtension) {
+      const res = await API.loadUnpackedExtension();
+      if (res && res.error) {
+        errorEl.textContent = res.error;
+        errorEl.classList.add('show');
+      } else if (res && res.success && res.extension) {
+        const existingIdx = extensions.findIndex((e) => e.id === res.extension.id);
+        if (existingIdx >= 0) extensions[existingIdx] = res.extension;
+        else extensions.push(res.extension);
+        renderExtensions();
+      }
+    }
+  });
+  footer.appendChild(loadBtn);
+  extPanelEl.appendChild(footer);
+}
+
+if (extBtnEl) {
+  extBtnEl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closePrivacyPanel();
+    closeEngineMenu();
+    const opening = !extPanelEl.classList.contains('open');
+    extPanelEl.classList.toggle('open', opening);
+    extBtnEl.classList.toggle('active', opening);
+    if (opening) renderExtensions();
+  });
+}
+
+if (extPanelEl) {
+  extPanelEl.addEventListener('click', (e) => e.stopPropagation());
+}
+window.addEventListener('click', closeExtensionsPanel);
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeExtensionsPanel(); });
 
 // --- Bridges from the main process ---
 if (API.hasTitleBarOverlay) {
@@ -1258,6 +1519,13 @@ if (API.onSettingsChanged) {
   });
 }
 
+if (API.onExtensionsChanged) {
+  API.onExtensionsChanged((list) => {
+    extensions = list || [];
+    renderExtensions();
+  });
+}
+
 // canGoBack()/canGoForward() have no change event, so poll them. Cheap.
 setInterval(syncToolbar, 400);
 
@@ -1274,6 +1542,13 @@ setInterval(syncToolbar, 400);
         searxngInstance = normalizeInstance(saved.searxngInstance) || searxngInstance;
       }
     } catch { /* fall back to the defaults */ }
+  }
+  if (API.getExtensions) {
+    try {
+      const list = await API.getExtensions();
+      extensions = list || [];
+      renderExtensions();
+    } catch { /* ignore */ }
   }
   setEngine(engineId);
   createTab(homeUrl());

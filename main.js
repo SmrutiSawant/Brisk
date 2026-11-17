@@ -15,6 +15,7 @@ const {
   configureDns,
   neutralUserAgent,
 } = require('./privacy');
+const { createExtensionManager } = require('./extensions');
 
 // --- Chromium switches. Must be set before the app is ready. ---
 
@@ -325,6 +326,31 @@ ipcMain.handle('clear-browsing-data', async (event) => {
 });
 
 // ---------------------------------------------------------------------------
+// Extensions
+// ---------------------------------------------------------------------------
+let extensionManager = null;
+
+ipcMain.handle('get-extensions', (event) => {
+  if (!fromUI(event) || !extensionManager) return [];
+  return extensionManager.list();
+});
+
+ipcMain.handle('load-unpacked-extension', async (event) => {
+  if (!fromUI(event) || !extensionManager) return { success: false, error: 'Extension manager unavailable' };
+  return await extensionManager.promptAndLoadUnpacked(mainWindow);
+});
+
+ipcMain.handle('remove-extension', async (event, extensionId) => {
+  if (!fromUI(event) || !extensionManager || typeof extensionId !== 'string') return { success: false };
+  return await extensionManager.remove(extensionId);
+});
+
+ipcMain.handle('toggle-pin-extension', async (event, extensionId, pinned) => {
+  if (!fromUI(event) || !extensionManager || typeof extensionId !== 'string') return [];
+  return extensionManager.togglePin(extensionId, pinned);
+});
+
+// ---------------------------------------------------------------------------
 // Window
 // ---------------------------------------------------------------------------
 
@@ -459,7 +485,7 @@ function matchShortcut(input) {
 // (mailto:, tel:) or refused outright — `javascript:` and top-level `data:`
 // URLs are classic phishing vectors, and `file:` would let a page walk the
 // disk.
-const ALLOWED_SCHEMES = new Set(['https:', 'http:', 'about:', 'blob:']);
+const ALLOWED_SCHEMES = new Set(['https:', 'http:', 'about:', 'blob:', 'chrome-extension:']);
 
 function isNewTabPage(url) {
   if (!url.startsWith('file://')) return false;
@@ -659,6 +685,13 @@ app.whenReady().then(async () => {
   // Not fatal, and not awaited — the window should not wait on a 2 MB filter
   // list download the first time the app runs.
   setupAdBlocker([defaultSession, privateSession]);
+
+  extensionManager = createExtensionManager({
+    session: defaultSession,
+    userDataPath: app.getPath('userData'),
+    notify: send,
+  });
+  await extensionManager.loadSaved();
 
   createWindow();
 

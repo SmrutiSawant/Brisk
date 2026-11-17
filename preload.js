@@ -67,4 +67,13 @@ contextBridge.exposeInMainWorld('browserAPI', {
   // --- Data ---
   // Main shows the confirmation dialog; this resolves false if declined.
   clearBrowsingData: () => ipcRenderer.invoke('clear-browsing-data'),
+
+  // --- Extensions ---
+  getExtensions: () => ipcRenderer.invoke('get-extensions'),
+  loadUnpackedExtension: () => ipcRenderer.invoke('load-unpacked-extension'),
+  removeExtension: (id) => ipcRenderer.invoke('remove-extension', id),
+  togglePinExtension: (id, pinned) => ipcRenderer.invoke('toggle-pin-extension', id, pinned),
+  onExtensionsChanged: (callback) => {
+    ipcRenderer.on('extensions-changed', (_event, extensions) => callback(extensions));
+  },
 });

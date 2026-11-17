@@ -481,6 +481,252 @@
   }
   .pp-select .chip { font-size: 10px; }
 
+  /* ---------- Extensions toolbar & button ---------- */
+  #exttoolbar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .ext-pinned-btn {
+    width: 24px;
+    height: 24px;
+    padding: 3px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    cursor: default;
+    display: grid;
+    place-items: center;
+    color: var(--text);
+  }
+  .ext-pinned-btn:hover { background: rgba(0,0,0,.08); }
+  .ext-pinned-btn img {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+    border-radius: 2px;
+  }
+  .ext-pinned-btn svg {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
+  }
+
+  #extbtn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    height: 24px;
+    padding: 0 9px 0 7px;
+    margin-right: 2px;
+    border: 0;
+    border-radius: 12px;
+    background: rgba(0,0,0,.06);
+    color: var(--text-dim);
+    font: inherit;
+    cursor: default;
+    position: relative;
+  }
+  #extbtn:hover { background: rgba(0,0,0,.11); color: var(--text); }
+  #extbtn.active { background: rgba(0,0,0,.14); color: var(--text); }
+  #extbtn.has-extensions { color: var(--text); }
+  #extbtn svg { width: 13px; height: 13px; fill: currentColor; flex: 0 0 13px; }
+  #extbtn span { font-size: 11px; font-variant-numeric: tabular-nums; display: none; }
+  #extbtn.has-extensions span { display: inline; }
+
+  /* ---------- Extensions panel ---------- */
+  #extensionspanel {
+    position: absolute;
+    top: 84px;
+    right: 8px;
+    z-index: 12;
+    width: 320px;
+    max-height: calc(100% - 100px);
+    overflow-y: auto;
+    padding: 5px;
+    border-radius: 10px;
+    background: var(--tab-active);
+    box-shadow: 0 0 0 1px var(--border), 0 10px 28px rgba(0,0,0,.16);
+    display: none;
+  }
+  #extensionspanel.open { display: block; }
+
+  .ext-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ext-panel-title {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .ext-panel-count {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .ext-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 6px 0;
+  }
+
+  .ext-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 9px;
+    border-radius: 7px;
+    background: var(--toolbar-bg);
+    border: 1px solid var(--border);
+  }
+  .ext-item-main {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .ext-item-icon {
+    width: 22px;
+    height: 22px;
+    flex: 0 0 22px;
+    object-fit: contain;
+    border-radius: 3px;
+  }
+  .ext-item-icon-svg {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    fill: var(--text-dim);
+  }
+  .ext-item-details {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .ext-item-name-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+  }
+  .ext-item-name {
+    font-weight: 600;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ext-item-ver {
+    font-size: 10px;
+    color: var(--text-dim);
+    flex: 0 0 auto;
+  }
+  .ext-item-desc {
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .ext-item-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    padding-top: 5px;
+    border-top: 1px solid rgba(0,0,0,.06);
+  }
+  .ext-action-btn {
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--tab-active);
+    color: var(--text);
+    font: inherit;
+    font-size: 11px;
+    cursor: default;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .ext-action-btn:hover { background: var(--tab-hover); }
+  .ext-action-btn.active { background: var(--text); color: var(--tab-active); border-color: var(--text); }
+  .ext-action-btn.danger { color: #c62828; }
+  .ext-action-btn.danger:hover { background: #ffebee; border-color: #ef9a9a; }
+  .ext-action-btn svg { width: 11px; height: 11px; fill: currentColor; }
+
+  .ext-empty {
+    padding: 16px 12px;
+    text-align: center;
+    color: var(--text-dim);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  .ext-empty svg {
+    width: 28px;
+    height: 28px;
+    fill: var(--text-faint);
+  }
+  .ext-empty b {
+    font-size: 12px;
+    color: var(--text);
+  }
+  .ext-empty small {
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .ext-footer {
+    padding: 6px 2px 2px;
+    border-top: 1px solid var(--border);
+  }
+  .ext-load-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border: 1px dashed var(--border);
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: default;
+  }
+  .ext-load-btn:hover {
+    background: var(--tab-hover);
+    border-color: var(--text);
+  }
+  .ext-load-btn svg {
+    width: 13px;
+    height: 13px;
+    fill: currentColor;
+  }
+
+  .ext-error {
+    margin: 4px 0;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: #ffebee;
+    color: #c62828;
+    font-size: 11px;
+    display: none;
+  }
+  .ext-error.show { display: block; }
+
   /* ---------- Insecure-connection bar ---------- */
   /* Sits over the page area rather than replacing it: an interstitial that
      blocks the whole page teaches people to click through interstitials. */
@@ -600,6 +846,13 @@
         <span id="enginename">—</span>
       </button>
 
+      <div id="exttoolbar"></div>
+
+      <button id="extbtn" title="Extensions">
+        <svg viewBox="0 0 24 24"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7s2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z"/></svg>
+        <span id="extcount">0</span>
+      </button>
+
       <button id="shield" title="Privacy for this site">
         <svg viewBox="0 0 24 24"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
         <span id="blockcount">0</span>
@@ -613,6 +866,9 @@
          is switchable from here — that is what makes them defensible rather
          than merely opinionated. -->
     <div id="privacypanel"></div>
+
+    <!-- Populated by renderer.js for extension management and actions. -->
+    <div id="extensionspanel"></div>
 
     <div id="views">
       <!-- Shown only when an HTTPS upgrade failed because the site has no
