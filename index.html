@@ -727,6 +727,448 @@
   }
   .ext-error.show { display: block; }
 
+  /* ---------- Bookmark Omnibox button ---------- */
+  #bookmarkbtn {
+    flex: 0 0 24px;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: default;
+    padding: 0;
+    transition: background .12s, color .12s;
+  }
+  #bookmarkbtn:hover:not(:disabled) {
+    background: rgba(0,0,0,.08);
+    color: var(--text);
+  }
+  #bookmarkbtn:disabled {
+    color: var(--text-faint);
+    cursor: default;
+  }
+  #bookmarkbtn svg {
+    width: 15px;
+    height: 15px;
+  }
+  #bookmarkbtn .star-filled { display: none; }
+  #bookmarkbtn .star-outline { display: block; }
+  #bookmarkbtn.bookmarked {
+    color: var(--text);
+  }
+  #bookmarkbtn.bookmarked .star-filled { display: block; }
+  #bookmarkbtn.bookmarked .star-outline { display: none; }
+
+  /* ---------- Bookmarks toolbar button ---------- */
+  #bookmarksbtn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    height: 24px;
+    padding: 0 8px;
+    margin-right: 2px;
+    border: 0;
+    border-radius: 12px;
+    background: rgba(0,0,0,.06);
+    color: var(--text-dim);
+    font: inherit;
+    cursor: default;
+    position: relative;
+  }
+  #bookmarksbtn:hover { background: rgba(0,0,0,.11); color: var(--text); }
+  #bookmarksbtn.active { background: rgba(0,0,0,.14); color: var(--text); }
+  #bookmarksbtn svg { width: 13px; height: 13px; fill: currentColor; }
+
+  /* ---------- Bookmarks bar ---------- */
+  #bookmarksbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 28px;
+    padding: 0 8px;
+    background: var(--toolbar-bg);
+    border-bottom: 1px solid var(--border);
+    flex: 0 0 auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  #bookmarksbar::-webkit-scrollbar { display: none; }
+  #bookmarksbaritems {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+  }
+  .bm-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 22px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 11.5px;
+    cursor: default;
+    max-width: 170px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
+  }
+  .bm-item:hover { background: rgba(0,0,0,.08); }
+  .bm-item-icon {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 14px;
+    object-fit: contain;
+    border-radius: 2px;
+  }
+  .bm-item-icon-svg {
+    width: 13px;
+    height: 13px;
+    flex: 0 0 13px;
+    fill: var(--text-dim);
+  }
+  .bm-item-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .bm-empty-hint {
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 0 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .bm-empty-btn {
+    padding: 2px 7px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--tab-active);
+    color: var(--text);
+    font: inherit;
+    font-size: 10.5px;
+    cursor: default;
+  }
+  .bm-empty-btn:hover { background: var(--tab-hover); }
+
+  /* ---------- Bookmark popup ---------- */
+  #bookmarkpopup {
+    position: absolute;
+    top: 80px;
+    right: 120px;
+    z-index: 20;
+    width: 310px;
+    padding: 12px;
+    border-radius: 10px;
+    background: var(--tab-active);
+    box-shadow: 0 0 0 1px var(--border), 0 10px 28px rgba(0,0,0,.16);
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+  }
+  #bookmarkpopup.open { display: flex; }
+  .bm-popup-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .bm-popup-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .bm-popup-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .bm-popup-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .bm-popup-field span {
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--text-dim);
+  }
+  .bm-popup-field input {
+    width: 100%;
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--toolbar-bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    outline: 0;
+    user-select: text;
+  }
+  .bm-popup-field input:focus {
+    border-color: var(--text);
+    background: var(--tab-active);
+  }
+  .bm-popup-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 4px;
+    border-top: 1px solid rgba(0,0,0,.06);
+  }
+  .bm-popup-btn {
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--tab-active);
+    color: var(--text);
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: default;
+  }
+  .bm-popup-btn:hover { background: var(--tab-hover); }
+  .bm-popup-btn.primary {
+    background: var(--text);
+    color: var(--tab-active);
+    border-color: var(--text);
+  }
+  .bm-popup-btn.primary:hover { background: #333333; }
+  .bm-popup-btn.danger {
+    color: #c62828;
+    border-color: var(--border);
+  }
+  .bm-popup-btn.danger:hover {
+    background: #ffebee;
+    border-color: #ef9a9a;
+  }
+
+  /* ---------- Bookmarks panel ---------- */
+  #bookmarkspanel {
+    position: absolute;
+    top: 84px;
+    right: 8px;
+    z-index: 12;
+    width: 320px;
+    max-height: calc(100% - 100px);
+    overflow-y: auto;
+    padding: 5px;
+    border-radius: 10px;
+    background: var(--tab-active);
+    box-shadow: 0 0 0 1px var(--border), 0 10px 28px rgba(0,0,0,.16);
+    display: none;
+  }
+  #bookmarkspanel.open { display: block; }
+  .bmp-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .bmp-title {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .bmp-count {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .bmp-search-wrap {
+    padding: 6px 4px 4px;
+  }
+  .bmp-search {
+    width: 100%;
+    height: 26px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--toolbar-bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 11px;
+    outline: 0;
+    user-select: text;
+  }
+  .bmp-search:focus {
+    border-color: var(--text);
+    background: var(--tab-active);
+  }
+  .bmp-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 0;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .bmp-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 7px;
+    cursor: default;
+  }
+  .bmp-item:hover {
+    background: var(--tab-hover);
+  }
+  .bmp-item-icon {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    object-fit: contain;
+    border-radius: 2px;
+  }
+  .bmp-item-icon-svg {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 14px;
+    fill: var(--text-dim);
+  }
+  .bmp-item-info {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .bmp-item-title {
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .bmp-item-url {
+    font-size: 10px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .bmp-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    opacity: 0;
+  }
+  .bmp-item:hover .bmp-item-actions {
+    opacity: 1;
+  }
+  .bmp-icon-btn {
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: default;
+    padding: 0;
+  }
+  .bmp-icon-btn:hover {
+    background: var(--border);
+    color: var(--text);
+  }
+  .bmp-icon-btn.danger:hover {
+    color: #c62828;
+    background: #ffebee;
+  }
+  .bmp-icon-btn svg {
+    width: 13px;
+    height: 13px;
+    fill: currentColor;
+  }
+  .bmp-empty {
+    padding: 16px 12px;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 11.5px;
+  }
+  .bmp-footer {
+    padding: 6px 4px 2px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .bmp-footer-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 6px;
+    font-size: 11.5px;
+    color: var(--text);
+  }
+  .bmp-add-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 11.5px;
+    cursor: default;
+  }
+  .bmp-add-btn:hover {
+    background: var(--tab-hover);
+    border-color: var(--text);
+  }
+  .bmp-add-btn svg {
+    width: 12px;
+    height: 12px;
+    fill: currentColor;
+  }
+
+  /* ---------- Bookmarks context menu ---------- */
+  #bmcontextmenu {
+    position: absolute;
+    z-index: 25;
+    min-width: 130px;
+    padding: 4px;
+    border-radius: 8px;
+    background: var(--tab-active);
+    box-shadow: 0 0 0 1px var(--border), 0 8px 24px rgba(0,0,0,.15);
+    display: none;
+  }
+  #bmcontextmenu.open { display: block; }
+  .bm-ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 5px 8px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 11.5px;
+    cursor: default;
+    text-align: left;
+  }
+  .bm-ctx-item:hover { background: var(--tab-hover); }
+  .bm-ctx-item.danger { color: #c62828; }
+  .bm-ctx-item.danger:hover { background: #ffebee; }
+
   /* ---------- Insecure-connection bar ---------- */
   /* Sits over the page area rather than replacing it: an interstitial that
      blocks the whole page teaches people to click through interstitials. */
@@ -839,6 +1281,12 @@
         </svg>
         <input id="url" type="text" spellcheck="false" autocomplete="off"
                placeholder="Search or type a URL" />
+        <button id="bookmarkbtn" title="Bookmark this tab (Ctrl+D)">
+          <svg viewBox="0 0 24 24">
+            <path class="star-outline" d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path class="star-filled" d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" fill="currentColor"/>
+          </svg>
+        </button>
       </div>
 
       <button id="engine" title="Change search engine">
@@ -853,10 +1301,19 @@
         <span id="extcount">0</span>
       </button>
 
+      <button id="bookmarksbtn" title="Bookmarks">
+        <svg viewBox="0 0 24 24"><path d="M19 18l2 1V3c0-1.1-.9-2-2-2H8.99C7.89 1 7 1.9 7 3h10c1.1 0 2 .9 2 2v13zM15 5H5c-1.1 0-2 .9-2 2v16l7-3 7 3V7c0-1.1-.9-2-2-2z"/></svg>
+      </button>
+
       <button id="shield" title="Privacy for this site">
         <svg viewBox="0 0 24 24"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
         <span id="blockcount">0</span>
       </button>
+    </div>
+
+    <!-- Bookmarks Bar -->
+    <div id="bookmarksbar">
+      <div id="bookmarksbaritems"></div>
     </div>
 
     <!-- Populated by renderer.js from SEARCH_ENGINES. -->
@@ -869,6 +1326,39 @@
 
     <!-- Populated by renderer.js for extension management and actions. -->
     <div id="extensionspanel"></div>
+
+    <!-- Bookmark popover bubble -->
+    <div id="bookmarkpopup">
+      <div class="bm-popup-head">
+        <span id="bmpopuptitle" class="bm-popup-title">Bookmark added</span>
+      </div>
+      <div class="bm-popup-body">
+        <label class="bm-popup-field">
+          <span>Name</span>
+          <input id="bmpopupname" type="text" spellcheck="false" autocomplete="off" />
+        </label>
+        <label class="bm-popup-field">
+          <span>URL</span>
+          <input id="bmpopupurl" type="text" spellcheck="false" autocomplete="off" />
+        </label>
+      </div>
+      <div class="bm-popup-actions">
+        <button id="bmpopupremove" class="bm-popup-btn danger">Remove</button>
+        <div style="flex: 1 1 auto;"></div>
+        <button id="bmpopupdone" class="bm-popup-btn primary">Done</button>
+      </div>
+    </div>
+
+    <!-- Populated by renderer.js for bookmark management. -->
+    <div id="bookmarkspanel"></div>
+
+    <!-- Context menu for bookmark items -->
+    <div id="bmcontextmenu">
+      <button class="bm-ctx-item" id="bmctxopen">Open</button>
+      <button class="bm-ctx-item" id="bmctxnewtab">Open in new tab</button>
+      <button class="bm-ctx-item" id="bmctxedit">Edit…</button>
+      <button class="bm-ctx-item danger" id="bmctxdelete">Delete</button>
+    </div>
 
     <div id="views">
       <!-- Shown only when an HTTPS upgrade failed because the site has no

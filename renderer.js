@@ -34,6 +34,7 @@ let settings = {
   blockDangerousDownloads: true,
   dnsMode: 'secure',
   sitePermissions: {},
+  showBookmarksBar: true,
 };
 
 function setSetting(key, value) {
@@ -170,6 +171,28 @@ const insecureBar    = document.getElementById('insecurebar');
 const insecureDetail = document.getElementById('insecuredetail');
 const insecureBack   = document.getElementById('insecureback');
 const insecureGo     = document.getElementById('insecurego');
+
+const bookmarkBtn         = document.getElementById('bookmarkbtn');
+const bookmarksBarEl      = document.getElementById('bookmarksbar');
+const bookmarksBarItemsEl = document.getElementById('bookmarksbaritems');
+const bookmarksBtn        = document.getElementById('bookmarksbtn');
+const bookmarksPanelEl    = document.getElementById('bookmarkspanel');
+const bookmarkPopup       = document.getElementById('bookmarkpopup');
+const bmPopupTitle        = document.getElementById('bmpopuptitle');
+const bmPopupName         = document.getElementById('bmpopupname');
+const bmPopupUrl          = document.getElementById('bmpopupurl');
+const bmPopupRemove       = document.getElementById('bmpopupremove');
+const bmPopupDone         = document.getElementById('bmpopupdone');
+const bmContextMenu       = document.getElementById('bmcontextmenu');
+const bmCtxOpen           = document.getElementById('bmctxopen');
+const bmCtxNewTab         = document.getElementById('bmctxnewtab');
+const bmCtxEdit           = document.getElementById('bmctxedit');
+const bmCtxDelete         = document.getElementById('bmctxdelete');
+
+let bookmarks = [];
+let editingBookmarkId = null;
+let contextBookmark = null;
+let bookmarkSearchQuery = '';
 
 /** @type {Array<{id:number, view:Element, wrap:Element, el:Element, titleEl:Element, iconEl:Element, url:string, title:string}>} */
 let tabs = [];
@@ -462,6 +485,7 @@ function createTab(url = homeUrl(), { activate = true, isPrivate = false } = {})
     // The http URL this tab's current load replaced, if the HTTPS upgrade is
     // what's being tried. Cleared the moment anything succeeds.
     pendingUpgrade: originalHttpFor(url),
+    favicon: null,
   };
   titleEl.textContent = tab.title;
   tabs.push(tab);
@@ -481,7 +505,15 @@ function createTab(url = homeUrl(), { activate = true, isPrivate = false } = {})
 
   view.addEventListener('page-favicon-updated', (e) => {
     const icon = e.favicons && e.favicons[0];
-    if (icon) { iconEl.src = icon; iconEl.classList.remove('blank'); }
+    if (icon) {
+      tab.favicon = icon;
+      iconEl.src = icon;
+      iconEl.classList.remove('blank');
+      const bm = findBookmarkByUrl(tab.url);
+      if (bm && !bm.favicon && API.updateBookmark) {
+        API.updateBookmark(bm.id, { favicon: icon });
+      }
+    }
   });
 
   view.addEventListener('did-start-loading', () => {
@@ -617,6 +649,7 @@ function syncToolbar() {
   lockIcon.setAttribute('title', insecure ? 'Not secure — this connection is unencrypted' : 'Secure connection');
 
   syncShield();
+  syncBookmarkStar();
 }
 
 function navigate(input) {
@@ -701,6 +734,9 @@ const ACTIONS = {
     activateTab(tabs[(i + step + tabs.length) % tabs.length].id);
     focusActiveView();   // follow the page you just switched to
   },
+
+  'toggle-bookmark': () => toggleBookmarkCurrentTab(),
+  'toggle-bookmarks-bar': () => toggleBookmarksBar(),
 };
 
 // Moving to a different tab should put the caret in that page, so the next
@@ -727,6 +763,8 @@ function shortcutFor(e) {
     if (key === 'w') return ['close-tab'];
     if (key === 'l') return ['focus-omnibox'];
     if (key === 'r') return [e.shiftKey ? 'hard-reload' : 'reload'];
+    if (key === 'd') return ['toggle-bookmark'];
+    if (key === 'b' && e.shiftKey) return ['toggle-bookmarks-bar'];
     if (key === 'tab') return ['cycle-tab', { step: e.shiftKey ? -1 : 1 }];
     if (key === 'delete' && e.shiftKey) return ['clear-data'];
   }
@@ -867,6 +905,9 @@ engineBtn.addEventListener('click', (e) => {
   e.stopPropagation();          // don't let the window handler close it again
   closePrivacyPanel();
   closeExtensionsPanel();
+  closeBookmarkPopup();
+  closeBookmarksPanel();
+  closeBookmarkContextMenu();
   engineMenu.classList.toggle('open');
 });
 
@@ -1198,6 +1239,9 @@ shieldEl.addEventListener('click', (e) => {
   e.stopPropagation();
   closeEngineMenu();
   closeExtensionsPanel();
+  closeBookmarkPopup();
+  closeBookmarksPanel();
+  closeBookmarkContextMenu();
   const opening = !panelEl.classList.contains('open');
   panelEl.classList.toggle('open', opening);
   if (opening) {
@@ -1454,6 +1498,9 @@ if (extBtnEl) {
     e.stopPropagation();
     closePrivacyPanel();
     closeEngineMenu();
+    closeBookmarkPopup();
+    closeBookmarksPanel();
+    closeBookmarkContextMenu();
     const opening = !extPanelEl.classList.contains('open');
     extPanelEl.classList.toggle('open', opening);
     extBtnEl.classList.toggle('active', opening);
@@ -1466,6 +1513,518 @@ if (extPanelEl) {
 }
 window.addEventListener('click', closeExtensionsPanel);
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeExtensionsPanel(); });
+
+// ---------------------------------------------------------------------------
+// Bookmarks
+// ---------------------------------------------------------------------------
+
+function normalizeBookmarkUrl(raw) {
+  if (!raw) return '';
+  try {
+    const u = new URL(raw);
+    const origin = u.origin.toLowerCase();
+    const pathname = u.pathname.replace(/\/+$/, '');
+    return origin + pathname + u.search + u.hash;
+  } catch {
+    return String(raw).trim().replace(/\/+$/, '');
+  }
+}
+
+function findBookmarkByUrl(url) {
+  if (!url) return null;
+  const norm = normalizeBookmarkUrl(url);
+  return bookmarks.find((b) => normalizeBookmarkUrl(b.url) === norm) || null;
+}
+
+function syncBookmarkStar() {
+  if (!bookmarkBtn) return;
+  const tab = activeTab();
+  if (!tab || !tab.url || tab.url.startsWith(NEWTAB)) {
+    bookmarkBtn.classList.remove('bookmarked');
+    bookmarkBtn.disabled = !tab || !tab.url || tab.url.startsWith(NEWTAB);
+    bookmarkBtn.title = 'Bookmark this tab (Ctrl+D)';
+    return;
+  }
+  bookmarkBtn.disabled = false;
+  const bm = findBookmarkByUrl(tab.url);
+  const isBm = Boolean(bm);
+  bookmarkBtn.classList.toggle('bookmarked', isBm);
+  bookmarkBtn.title = isBm ? `Edit bookmark for this tab: ${bm.title} (Ctrl+D)` : 'Bookmark this tab (Ctrl+D)';
+}
+
+function closeBookmarkPopup() {
+  if (bookmarkPopup) bookmarkPopup.classList.remove('open');
+  editingBookmarkId = null;
+}
+
+function openBookmarkPopup(bookmark, isNew = false) {
+  if (!bookmarkPopup || !bookmark) return;
+  closePrivacyPanel();
+  closeEngineMenu();
+  closeExtensionsPanel();
+  closeBookmarksPanel();
+  closeBookmarkContextMenu();
+
+  editingBookmarkId = bookmark.id || null;
+  bmPopupTitle.textContent = isNew ? 'Bookmark added' : 'Edit bookmark';
+  bmPopupName.value = bookmark.title || '';
+  bmPopupUrl.value = bookmark.url || '';
+  bmPopupRemove.style.display = (bookmark.id || isNew) ? 'inline-block' : 'none';
+
+  if (bookmarkBtn) {
+    const rect = bookmarkBtn.getBoundingClientRect();
+    bookmarkPopup.style.top = (rect.bottom + 6) + 'px';
+    const rightOffset = Math.max(8, window.innerWidth - rect.right - 10);
+    bookmarkPopup.style.right = rightOffset + 'px';
+  }
+
+  bookmarkPopup.classList.add('open');
+  setTimeout(() => {
+    bmPopupName.focus();
+    bmPopupName.select();
+  }, 50);
+}
+
+async function saveBookmarkFromPopup() {
+  if (!bookmarkPopup) return;
+  const title = bmPopupName.value.trim() || 'Untitled';
+  const url = bmPopupUrl.value.trim();
+  if (!url) {
+    closeBookmarkPopup();
+    return;
+  }
+
+  if (editingBookmarkId && API.updateBookmark) {
+    await API.updateBookmark(editingBookmarkId, { title, url });
+  } else if (API.addBookmark) {
+    await API.addBookmark({ title, url });
+  }
+  closeBookmarkPopup();
+  syncBookmarkStar();
+}
+
+async function removeBookmarkFromPopup() {
+  if (!bookmarkPopup) return;
+  if (editingBookmarkId && API.removeBookmark) {
+    await API.removeBookmark(editingBookmarkId);
+  } else {
+    const tab = activeTab();
+    if (tab && tab.url && API.removeBookmark) {
+      await API.removeBookmark(tab.url);
+    }
+  }
+  closeBookmarkPopup();
+  syncBookmarkStar();
+}
+
+async function toggleBookmarkCurrentTab() {
+  const tab = activeTab();
+  if (!tab || !tab.url || tab.url.startsWith(NEWTAB)) return;
+
+  const existing = findBookmarkByUrl(tab.url);
+  if (existing) {
+    openBookmarkPopup(existing, false);
+  } else {
+    if (API.addBookmark) {
+      const newBm = await API.addBookmark({
+        title: tab.title || tab.url,
+        url: tab.url,
+        favicon: tab.favicon || null,
+      });
+      if (newBm) {
+        bookmarks.push(newBm);
+        syncBookmarkStar();
+        renderBookmarksBar();
+        openBookmarkPopup(newBm, true);
+        return;
+      }
+    }
+    openBookmarkPopup({ title: tab.title, url: tab.url }, true);
+  }
+}
+
+function toggleBookmarksBar() {
+  setSetting('showBookmarksBar', !settings.showBookmarksBar);
+  renderBookmarksBar();
+  if (bookmarksPanelEl && bookmarksPanelEl.classList.contains('open')) {
+    renderBookmarksPanel();
+  }
+}
+
+function closeBookmarkContextMenu() {
+  if (bmContextMenu) bmContextMenu.classList.remove('open');
+  contextBookmark = null;
+}
+
+function openBookmarkContextMenu(e, bm) {
+  if (!bmContextMenu || !bm) return;
+  e.preventDefault();
+  e.stopPropagation();
+  closePrivacyPanel();
+  closeEngineMenu();
+  closeExtensionsPanel();
+  closeBookmarkPopup();
+  closeBookmarksPanel();
+
+  contextBookmark = bm;
+  bmContextMenu.style.left = Math.min(e.clientX, window.innerWidth - 140) + 'px';
+  bmContextMenu.style.top = (e.clientY + 4) + 'px';
+  bmContextMenu.classList.add('open');
+}
+
+function createFallbackIcon() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.classList.add('bm-item-icon-svg');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z');
+  svg.appendChild(path);
+  return svg;
+}
+
+function renderBookmarksBar() {
+  if (!bookmarksBarEl || !bookmarksBarItemsEl) return;
+  const show = settings.showBookmarksBar !== false;
+  bookmarksBarEl.style.display = show ? 'flex' : 'none';
+  document.body.classList.toggle('has-bookmarks-bar', show);
+  if (!show) return;
+
+  bookmarksBarItemsEl.textContent = '';
+  if (bookmarks.length === 0) {
+    const hint = document.createElement('div');
+    hint.className = 'bm-empty-hint';
+    hint.textContent = 'No bookmarks yet.';
+    const addBtn = document.createElement('button');
+    addBtn.className = 'bm-empty-btn';
+    addBtn.textContent = '+ Bookmark this tab';
+    addBtn.addEventListener('click', () => toggleBookmarkCurrentTab());
+    hint.appendChild(addBtn);
+    bookmarksBarItemsEl.appendChild(hint);
+    return;
+  }
+
+  for (const bm of bookmarks) {
+    const item = document.createElement('button');
+    item.className = 'bm-item';
+    item.title = `${bm.title}\n${bm.url}`;
+
+    if (bm.favicon) {
+      const img = document.createElement('img');
+      img.className = 'bm-item-icon';
+      img.src = bm.favicon;
+      img.addEventListener('error', () => {
+        img.replaceWith(createFallbackIcon());
+      });
+      item.appendChild(img);
+    } else {
+      item.appendChild(createFallbackIcon());
+    }
+
+    const title = document.createElement('span');
+    title.className = 'bm-item-title';
+    title.textContent = bm.title || 'Untitled';
+    item.appendChild(title);
+
+    item.addEventListener('click', (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        createTab(bm.url);
+      } else {
+        navigate(bm.url);
+      }
+    });
+    item.addEventListener('mousedown', (e) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        createTab(bm.url);
+      }
+    });
+    item.addEventListener('contextmenu', (e) => {
+      openBookmarkContextMenu(e, bm);
+    });
+
+    bookmarksBarItemsEl.appendChild(item);
+  }
+}
+
+function closeBookmarksPanel() {
+  if (bookmarksPanelEl) bookmarksPanelEl.classList.remove('open');
+  if (bookmarksBtn) bookmarksBtn.classList.remove('active');
+}
+
+function openBookmarksPanel() {
+  closePrivacyPanel();
+  closeEngineMenu();
+  closeExtensionsPanel();
+  closeBookmarkPopup();
+  closeBookmarkContextMenu();
+  if (bookmarksPanelEl) bookmarksPanelEl.classList.add('open');
+  if (bookmarksBtn) bookmarksBtn.classList.add('active');
+  renderBookmarksPanel();
+}
+
+function renderBookmarksPanel() {
+  if (!bookmarksPanelEl || !bookmarksBtn) return;
+  bookmarksPanelEl.textContent = '';
+
+  const count = bookmarks.length;
+
+  const head = document.createElement('div');
+  head.className = 'bmp-head';
+  head.innerHTML = `
+    <span class="bmp-title">Bookmarks</span>
+    <span class="bmp-count">${count} bookmark${count === 1 ? '' : 's'}</span>
+  `;
+  bookmarksPanelEl.appendChild(head);
+
+  const searchWrap = document.createElement('div');
+  searchWrap.className = 'bmp-search-wrap';
+  const searchInput = document.createElement('input');
+  searchInput.className = 'bmp-search';
+  searchInput.type = 'text';
+  searchInput.placeholder = 'Search bookmarks…';
+  searchInput.value = bookmarkSearchQuery;
+  searchInput.addEventListener('input', (e) => {
+    bookmarkSearchQuery = e.target.value;
+    updateBookmarksList(listEl);
+  });
+  searchWrap.appendChild(searchInput);
+  bookmarksPanelEl.appendChild(searchWrap);
+
+  const listEl = document.createElement('div');
+  listEl.className = 'bmp-list';
+  updateBookmarksList(listEl);
+  bookmarksPanelEl.appendChild(listEl);
+
+  const footer = document.createElement('div');
+  footer.className = 'bmp-footer';
+
+  const barRow = document.createElement('div');
+  barRow.className = 'bmp-footer-row';
+  barRow.innerHTML = `<span>Show bookmarks bar</span>`;
+  const barToggleBtn = document.createElement('button');
+  barToggleBtn.className = 'pp-row' + (settings.showBookmarksBar !== false ? ' on' : '');
+  barToggleBtn.style.padding = '0';
+  barToggleBtn.style.width = 'auto';
+  const sw = document.createElement('div');
+  sw.className = 'sw';
+  barToggleBtn.appendChild(sw);
+  barToggleBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleBookmarksBar();
+  });
+  barRow.appendChild(barToggleBtn);
+  footer.appendChild(barRow);
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'bmp-add-btn';
+  addBtn.innerHTML = `
+    <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+    Bookmark current tab
+  `;
+  addBtn.addEventListener('click', () => {
+    closeBookmarksPanel();
+    toggleBookmarkCurrentTab();
+  });
+  footer.appendChild(addBtn);
+
+  bookmarksPanelEl.appendChild(footer);
+}
+
+function updateBookmarksList(listEl) {
+  listEl.textContent = '';
+  const q = bookmarkSearchQuery.toLowerCase().trim();
+  const filtered = q
+    ? bookmarks.filter((b) => (b.title || '').toLowerCase().includes(q) || (b.url || '').toLowerCase().includes(q))
+    : bookmarks;
+
+  if (filtered.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'bmp-empty';
+    empty.textContent = q ? 'No matching bookmarks' : 'No bookmarks yet';
+    listEl.appendChild(empty);
+    return;
+  }
+
+  for (const bm of filtered) {
+    const row = document.createElement('div');
+    row.className = 'bmp-item';
+
+    if (bm.favicon) {
+      const img = document.createElement('img');
+      img.className = 'bmp-item-icon';
+      img.src = bm.favicon;
+      img.addEventListener('error', () => img.replaceWith(createFallbackIcon()));
+      row.appendChild(img);
+    } else {
+      row.appendChild(createFallbackIcon());
+    }
+
+    const info = document.createElement('div');
+    info.className = 'bmp-item-info';
+    const title = document.createElement('span');
+    title.className = 'bmp-item-title';
+    title.textContent = bm.title || 'Untitled';
+    const url = document.createElement('span');
+    url.className = 'bmp-item-url';
+    try { url.textContent = new URL(bm.url).hostname; } catch { url.textContent = bm.url; }
+    info.append(title, url);
+    row.appendChild(info);
+
+    const actions = document.createElement('div');
+    actions.className = 'bmp-item-actions';
+
+    const openTabBtn = document.createElement('button');
+    openTabBtn.className = 'bmp-icon-btn';
+    openTabBtn.title = 'Open in new tab';
+    openTabBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>';
+    openTabBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeBookmarksPanel();
+      createTab(bm.url);
+    });
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'bmp-icon-btn';
+    editBtn.title = 'Edit bookmark';
+    editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+    editBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeBookmarksPanel();
+      openBookmarkPopup(bm, false);
+    });
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'bmp-icon-btn danger';
+    delBtn.title = 'Delete bookmark';
+    delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+    delBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (API.removeBookmark) {
+        await API.removeBookmark(bm.id);
+        bookmarks = bookmarks.filter((b) => b.id !== bm.id);
+        updateBookmarksList(listEl);
+        renderBookmarksBar();
+        syncBookmarkStar();
+      }
+    });
+
+    actions.append(openTabBtn, editBtn, delBtn);
+    row.appendChild(actions);
+
+    row.addEventListener('click', () => {
+      closeBookmarksPanel();
+      navigate(bm.url);
+    });
+
+    listEl.appendChild(row);
+  }
+}
+
+// Bookmark event listeners
+if (bookmarkBtn) {
+  bookmarkBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleBookmarkCurrentTab();
+  });
+}
+
+if (bookmarksBtn) {
+  bookmarksBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closePrivacyPanel();
+    closeEngineMenu();
+    closeExtensionsPanel();
+    closeBookmarkPopup();
+    closeBookmarkContextMenu();
+    const opening = !bookmarksPanelEl.classList.contains('open');
+    bookmarksPanelEl.classList.toggle('open', opening);
+    bookmarksBtn.classList.toggle('active', opening);
+    if (opening) renderBookmarksPanel();
+  });
+}
+
+if (bmPopupDone) {
+  bmPopupDone.addEventListener('click', (e) => {
+    e.stopPropagation();
+    saveBookmarkFromPopup();
+  });
+}
+
+if (bmPopupRemove) {
+  bmPopupRemove.addEventListener('click', (e) => {
+    e.stopPropagation();
+    removeBookmarkFromPopup();
+  });
+}
+
+if (bmPopupName) {
+  bmPopupName.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') saveBookmarkFromPopup();
+    else if (e.key === 'Escape') closeBookmarkPopup();
+  });
+}
+
+if (bmPopupUrl) {
+  bmPopupUrl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') saveBookmarkFromPopup();
+    else if (e.key === 'Escape') closeBookmarkPopup();
+  });
+}
+
+if (bmCtxOpen) {
+  bmCtxOpen.addEventListener('click', () => {
+    if (contextBookmark) {
+      navigate(contextBookmark.url);
+      closeBookmarkContextMenu();
+    }
+  });
+}
+
+if (bmCtxNewTab) {
+  bmCtxNewTab.addEventListener('click', () => {
+    if (contextBookmark) {
+      createTab(contextBookmark.url);
+      closeBookmarkContextMenu();
+    }
+  });
+}
+
+if (bmCtxEdit) {
+  bmCtxEdit.addEventListener('click', () => {
+    if (contextBookmark) {
+      const bm = contextBookmark;
+      closeBookmarkContextMenu();
+      openBookmarkPopup(bm, false);
+    }
+  });
+}
+
+if (bmCtxDelete) {
+  bmCtxDelete.addEventListener('click', async () => {
+    if (contextBookmark && API.removeBookmark) {
+      await API.removeBookmark(contextBookmark.id);
+      closeBookmarkContextMenu();
+    }
+  });
+}
+
+if (bookmarkPopup) bookmarkPopup.addEventListener('click', (e) => e.stopPropagation());
+if (bookmarksPanelEl) bookmarksPanelEl.addEventListener('click', (e) => e.stopPropagation());
+if (bmContextMenu) bmContextMenu.addEventListener('click', (e) => e.stopPropagation());
+
+window.addEventListener('click', () => {
+  closeBookmarkPopup();
+  closeBookmarksPanel();
+  closeBookmarkContextMenu();
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeBookmarkPopup();
+    closeBookmarksPanel();
+    closeBookmarkContextMenu();
+  }
+});
 
 // --- Bridges from the main process ---
 if (API.hasTitleBarOverlay) {
@@ -1516,6 +2075,7 @@ if (API.onSettingsChanged) {
   API.onSettingsChanged((saved) => {
     if (saved) settings = { ...settings, ...saved };
     renderPrivacyPanel();
+    renderBookmarksBar();
   });
 }
 
@@ -1523,6 +2083,17 @@ if (API.onExtensionsChanged) {
   API.onExtensionsChanged((list) => {
     extensions = list || [];
     renderExtensions();
+  });
+}
+
+if (API.onBookmarksChanged) {
+  API.onBookmarksChanged((list) => {
+    bookmarks = list || [];
+    renderBookmarksBar();
+    syncBookmarkStar();
+    if (bookmarksPanelEl && bookmarksPanelEl.classList.contains('open')) {
+      renderBookmarksPanel();
+    }
   });
 }
 
@@ -1548,6 +2119,14 @@ setInterval(syncToolbar, 400);
       const list = await API.getExtensions();
       extensions = list || [];
       renderExtensions();
+    } catch { /* ignore */ }
+  }
+  if (API.getBookmarks) {
+    try {
+      const list = await API.getBookmarks();
+      bookmarks = list || [];
+      renderBookmarksBar();
+      syncBookmarkStar();
     } catch { /* ignore */ }
   }
   setEngine(engineId);

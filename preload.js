@@ -76,4 +76,14 @@ contextBridge.exposeInMainWorld('browserAPI', {
   onExtensionsChanged: (callback) => {
     ipcRenderer.on('extensions-changed', (_event, extensions) => callback(extensions));
   },
+
+  // --- Bookmarks ---
+  getBookmarks: () => ipcRenderer.invoke('get-bookmarks'),
+  addBookmark: (item) => ipcRenderer.invoke('add-bookmark', item),
+  removeBookmark: (idOrUrl) => ipcRenderer.invoke('remove-bookmark', idOrUrl),
+  updateBookmark: (id, patch) => ipcRenderer.invoke('update-bookmark', id, patch),
+  isBookmarked: (url) => ipcRenderer.invoke('is-bookmarked', url),
+  onBookmarksChanged: (callback) => {
+    ipcRenderer.on('bookmarks-changed', (_event, bookmarks) => callback(bookmarks));
+  },
 });

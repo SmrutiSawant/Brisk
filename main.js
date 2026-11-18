@@ -16,6 +16,7 @@ const {
   neutralUserAgent,
 } = require('./privacy');
 const { createExtensionManager } = require('./extensions');
+const { createBookmarkManager } = require('./bookmarks');
 
 // --- Chromium switches. Must be set before the app is ready. ---
 
@@ -78,6 +79,7 @@ const DEFAULT_SETTINGS = {
 
   // Per-host permission grants: { "maps.example.com": { geolocation: true } }
   sitePermissions: {},
+  showBookmarksBar: true,
 };
 
 // A hand-edited or corrupt settings file must not be able to inject state the
@@ -99,6 +101,7 @@ const VALIDATORS = {
   clearOnExit: isBool,
   askWhereToSaveDownloads: isBool,
   blockDangerousDownloads: isBool,
+  showBookmarksBar: isBool,
 
   dnsMode: (v) => ['secure', 'automatic', 'off'].includes(v),
   dnsServers: (v) =>
@@ -329,6 +332,7 @@ ipcMain.handle('clear-browsing-data', async (event) => {
 // Extensions
 // ---------------------------------------------------------------------------
 let extensionManager = null;
+let bookmarkManager = null;
 
 ipcMain.handle('get-extensions', (event) => {
   if (!fromUI(event) || !extensionManager) return [];
@@ -348,6 +352,34 @@ ipcMain.handle('remove-extension', async (event, extensionId) => {
 ipcMain.handle('toggle-pin-extension', async (event, extensionId, pinned) => {
   if (!fromUI(event) || !extensionManager || typeof extensionId !== 'string') return [];
   return extensionManager.togglePin(extensionId, pinned);
+});
+
+// ---------------------------------------------------------------------------
+// Bookmarks
+// ---------------------------------------------------------------------------
+ipcMain.handle('get-bookmarks', (event) => {
+  if (!fromUI(event) || !bookmarkManager) return [];
+  return bookmarkManager.list();
+});
+
+ipcMain.handle('add-bookmark', (event, item) => {
+  if (!fromUI(event) || !bookmarkManager || !item) return null;
+  return bookmarkManager.add(item);
+});
+
+ipcMain.handle('remove-bookmark', (event, idOrUrl) => {
+  if (!fromUI(event) || !bookmarkManager || typeof idOrUrl !== 'string') return false;
+  return bookmarkManager.remove(idOrUrl);
+});
+
+ipcMain.handle('update-bookmark', (event, id, patch) => {
+  if (!fromUI(event) || !bookmarkManager || typeof id !== 'string') return null;
+  return bookmarkManager.update(id, patch);
+});
+
+ipcMain.handle('is-bookmarked', (event, url) => {
+  if (!fromUI(event) || !bookmarkManager || typeof url !== 'string') return false;
+  return bookmarkManager.isBookmarked(url);
 });
 
 // ---------------------------------------------------------------------------
@@ -451,7 +483,7 @@ function createWindow() {
 // main window has to be given focus first, or the keystroke lands in a page
 // that is no longer in front.
 
-const FOCUS_UI = new Set(['new-tab', 'new-private-tab', 'focus-omnibox']);
+const FOCUS_UI = new Set(['new-tab', 'new-private-tab', 'focus-omnibox', 'toggle-bookmark']);
 
 function matchShortcut(input) {
   const ctrl = input.control || input.meta;
@@ -463,6 +495,8 @@ function matchShortcut(input) {
     if (key === 'w') return { action: 'close-tab' };
     if (key === 'l') return { action: 'focus-omnibox' };
     if (key === 'r') return { action: input.shift ? 'hard-reload' : 'reload' };
+    if (key === 'd') return { action: 'toggle-bookmark' };
+    if (key === 'b' && input.shift) return { action: 'toggle-bookmarks-bar' };
     if (key === 'tab') return { action: 'cycle-tab', step: input.shift ? -1 : 1 };
     if (key === 'delete' && input.shift) return { action: 'clear-data' };
   }
@@ -692,6 +726,12 @@ app.whenReady().then(async () => {
     notify: send,
   });
   await extensionManager.loadSaved();
+
+  bookmarkManager = createBookmarkManager({
+    userDataPath: app.getPath('userData'),
+    notify: send,
+  });
+  bookmarkManager.loadSaved();
 
   createWindow();
 

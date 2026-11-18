@@ -163,6 +163,8 @@ Shortcuts work even when you're interacting with a website inside a tab.
 | `Ctrl+L` | Focus the address bar |
 | `Ctrl+R` | Reload page |
 | `Ctrl+Shift+R` | Hard reload |
+| `Ctrl+D` | Bookmark / edit bookmark for current page |
+| `Ctrl+Shift+B` | Toggle bookmarks bar |
 | `Ctrl+Tab` | Switch to next tab |
 | `Ctrl+Shift+Tab` | Switch to previous tab |
 | `Alt+Left / Right` | Navigate back / forward |
@@ -183,6 +185,7 @@ The project is split into a few main files, with each one handling a specific pa
 | `preload.js` | Provides a limited and secure bridge between the main process and browser interface |
 | `index.html` | Contains the browser interface, including the tab strip, toolbar, privacy panel, and styling |
 | `renderer.js` | Handles tabs, navigation, URL parsing, keyboard shortcuts, and the privacy panel |
+| `bookmarks.js` | Handles persistent bookmark storage, validation, querying, and live notifications |
 | `newtab.html` | Defines the custom new tab page |
 | `newtab.js` | Handles new tab functionality and quick links |
 | `ROADMAP.md` | Lists planned features and future improvements |
@@ -195,7 +198,7 @@ This makes the privacy-related code easier to find, review, and maintain.
 
 Some features have been left out to keep the initial version manageable.
 
-- Bookmarks and browsing history.
+- Browsing history.
 - A downloads panel to view and manage downloaded files.
 - Find-in-page.
 - Page zoom controls.
