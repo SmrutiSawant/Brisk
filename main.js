@@ -426,7 +426,7 @@ ipcMain.handle('add-cast-device-ip', async (event, ip) => {
 
 ipcMain.handle('cast-to-device', async (event, deviceId) => {
   if (!fromUI(event) || !castManager || typeof deviceId !== 'string') return { success: false };
-  return await castManager.castToDlnaDevice(deviceId);
+  return await castManager.castToDevice(deviceId);
 });
 
 ipcMain.on('set-cast-active-tab', (event, info) => {

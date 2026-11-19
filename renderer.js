@@ -2054,14 +2054,14 @@ window.addEventListener('keydown', (e) => {
 let castStatus = {
   isStreaming: false,
   isPaused: false,
-  source: 'tab',
+  source: 'screen',
   fps: 30,
   targetFps: 30,
   quality: 75,
   port: 8554,
   url: 'http://127.0.0.1:8554',
   clientCount: 0,
-  title: 'Active Tab',
+  title: 'Entire Screen',
   uptimeSec: 0,
   totalFramesSent: 0,
   qrSvg: '',
@@ -2073,7 +2073,7 @@ let castDevices = [];
 let isScanningDevices = false;
 let showManualIpInput = false;
 let castNoticeBanner = null; // { title, message }
-let selectedCastSource = 'tab'; // 'tab' | 'screen' | 'window'
+let selectedCastSource = 'screen'; // 'screen' | 'tab' | 'window'
 let selectedQualityPreset = '1080p'; // '1080p' | '60fps' | 'eco'
 
 function syncCastButton() {
@@ -2145,10 +2145,14 @@ function openCastPanel() {
   }
 }
 
-function toggleCastPanel() {
+async function toggleCastPanel() {
   if (castPanelEl && castPanelEl.classList.contains('open')) {
     closeCastPanel();
   } else {
+    if (!castStatus.isStreaming) {
+      selectedCastSource = 'screen';
+      await applyCastConfig();
+    }
     openCastPanel();
   }
 }
@@ -2298,9 +2302,10 @@ function renderCastPanel() {
   if (!castStatus.isStreaming) {
     const startBtn = document.createElement('button');
     startBtn.className = 'cp-start-btn';
-    startBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Start Casting';
+    startBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Cast Screen';
     startBtn.addEventListener('click', async () => {
       startBtn.textContent = 'Starting…';
+      selectedCastSource = 'screen';
       await applyCastConfig();
     });
     actionRow.appendChild(startBtn);
@@ -2566,24 +2571,40 @@ function renderCastPanel() {
       const actBtn = document.createElement('button');
       actBtn.className = 'cp-device-action-btn';
       if (dev.canDirectPlay) {
-        actBtn.textContent = 'Play on TV';
+        actBtn.textContent = 'Cast to TV';
+        actBtn.title = `Directly cast screen to ${dev.name}`;
         actBtn.addEventListener('click', async () => {
-          actBtn.textContent = 'Sending…';
+          actBtn.textContent = 'Connecting…';
           if (!castStatus.isStreaming) {
+            selectedCastSource = 'screen';
             await applyCastConfig();
           }
           if (API.castToDevice) {
             const res = await API.castToDevice(dev.id);
-            actBtn.textContent = res && res.success ? 'Playing!' : 'Failed';
-            setTimeout(() => { actBtn.textContent = 'Play on TV'; }, 2500);
+            if (res && res.success) {
+              actBtn.textContent = 'Casting on TV!';
+              castNoticeBanner = {
+                title: `Casting to ${dev.name}`,
+                message: `Live screen is now casting directly on ${dev.name}!`,
+              };
+            } else {
+              actBtn.textContent = 'Failed';
+              castNoticeBanner = {
+                title: `Cast to ${dev.name}`,
+                message: res && res.error ? `Notice: ${res.error}` : 'Could not stream directly to TV. You can also open the URL on the TV browser.',
+              };
+              setTimeout(() => { actBtn.textContent = 'Cast to TV'; }, 3000);
+            }
+            renderCastPanel();
           }
         });
       } else {
-        actBtn.textContent = 'Cast';
+        actBtn.textContent = 'Connect';
         actBtn.title = `Start casting and get connection URL for ${dev.name}`;
         actBtn.addEventListener('click', async () => {
           actBtn.textContent = 'Starting…';
           if (!castStatus.isStreaming) {
+            selectedCastSource = 'screen';
             await applyCastConfig();
           }
           const streamUrl = castStatus.url || `http://${dev.ip}:8554`;
@@ -2637,7 +2658,7 @@ function renderCastPanel() {
 }
 
 if (castBtnEl) {
-  castBtnEl.addEventListener('click', (e) => {
+  castBtnEl.addEventListener('click', async (e) => {
     e.stopPropagation();
     closePrivacyPanel();
     closeEngineMenu();
@@ -2645,7 +2666,15 @@ if (castBtnEl) {
     closeBookmarkPopup();
     closeBookmarksPanel();
     closeBookmarkContextMenu();
-    const opening = !castPanelEl.classList.contains('open');
+
+    const wasOpen = castPanelEl.classList.contains('open');
+    if (!wasOpen && !castStatus.isStreaming) {
+      // Directly start casting the screen on click!
+      selectedCastSource = 'screen';
+      await applyCastConfig();
+    }
+
+    const opening = !wasOpen;
     castPanelEl.classList.toggle('open', opening);
     castBtnEl.classList.toggle('active', opening);
     if (opening) renderCastPanel();

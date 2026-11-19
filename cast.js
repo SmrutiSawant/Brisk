@@ -6,6 +6,7 @@
 
 const { desktopCapturer, screen, webContents } = require('electron');
 const http = require('http');
+const tls = require('tls');
 const dgram = require('dgram');
 const os = require('os');
 const crypto = require('crypto');
@@ -644,11 +645,11 @@ function getReceiverHtml(title, serverPort) {
 function createCastManager({ getActiveTabWebContents, getMainWindow, notify, userDataPath }) {
   let isStreaming = false;
   let isPaused = false;
-  let currentSource = 'tab'; // 'tab' | 'screen' | 'window'
+  let currentSource = 'screen'; // 'screen' | 'tab' | 'window'
   let targetFps = 30;
   let jpegQuality = 75;
   let activeTabId = null;
-  let streamTitle = 'Active Tab';
+  let streamTitle = 'Entire Screen';
 
   let httpServer = null;
   let assignedPort = 8554;
@@ -1067,7 +1068,7 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
         model,
         type: 'chromecast',
         ip,
-        canDirectPlay: false,
+        canDirectPlay: true,
       };
       addDevice(dev);
       return dev;
@@ -1255,7 +1256,7 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
             type: 'chromecast',
             model: modelName,
             ip: rinfo.address,
-            canDirectPlay: false,
+            canDirectPlay: true,
           });
         }
       });
@@ -1460,10 +1461,252 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
   }
 
   // -------------------------------------------------------------------------
+  // Google Cast v2 Direct Streaming (Smart TVs & Android TVs on TLS:8009)
+  // -------------------------------------------------------------------------
+
+  let activeCastClient = null;
+
+  function disconnectActiveCastClient() {
+    if (activeCastClient) {
+      try {
+        if (activeCastClient.pingInterval) clearInterval(activeCastClient.pingInterval);
+        if (activeCastClient.updateInterval) clearInterval(activeCastClient.updateInterval);
+        if (activeCastClient.socket && !activeCastClient.socket.destroyed) {
+          activeCastClient.socket.end();
+        }
+      } catch {}
+      activeCastClient = null;
+    }
+  }
+
+  function encodeVarint(val) {
+    const buf = [];
+    while (val > 0x7f) {
+      buf.push((val & 0x7f) | 0x80);
+      val >>>= 7;
+    }
+    buf.push(val & 0x7f);
+    return Buffer.from(buf);
+  }
+
+  function encodeStringField(fieldNumber, str) {
+    const tag = (fieldNumber << 3) | 2;
+    const strBuf = Buffer.from(str, 'utf8');
+    return Buffer.concat([Buffer.from([tag]), encodeVarint(strBuf.length), strBuf]);
+  }
+
+  function buildCastMessage(sourceId, destId, namespace, payloadJson) {
+    const f1 = Buffer.from([0x08, 0x00]);
+    const f2 = encodeStringField(2, sourceId);
+    const f3 = encodeStringField(3, destId);
+    const f4 = encodeStringField(4, namespace);
+    const f5 = Buffer.from([0x28, 0x00]);
+    const f6 = encodeStringField(6, payloadJson);
+
+    const body = Buffer.concat([f1, f2, f3, f4, f5, f6]);
+    const lenBuf = Buffer.alloc(4);
+    lenBuf.writeUInt32BE(body.length, 0);
+    return Buffer.concat([lenBuf, body]);
+  }
+
+  function decodeCastMessages(buffer) {
+    const msgs = [];
+    let offset = 0;
+    while (offset + 4 <= buffer.length) {
+      const len = buffer.readUInt32BE(offset);
+      if (offset + 4 + len > buffer.length) break;
+      const body = buffer.slice(offset + 4, offset + 4 + len);
+      offset += 4 + len;
+
+      let pos = 0;
+      let sourceId = '', destId = '', ns = '', payload = '';
+      while (pos < body.length) {
+        const tag = body[pos++];
+        const wireType = tag & 0x07;
+        const fieldNum = tag >>> 3;
+        if (wireType === 0) {
+          while (pos < body.length) {
+            const b = body[pos++];
+            if (!(b & 0x80)) break;
+          }
+        } else if (wireType === 2) {
+          let strLen = 0, shift = 0;
+          while (pos < body.length) {
+            const b = body[pos++];
+            strLen |= (b & 0x7f) << shift;
+            if (!(b & 0x80)) break;
+            shift += 7;
+          }
+          const s = body.slice(pos, pos + strLen);
+          pos += strLen;
+          if (fieldNum === 2) sourceId = s.toString('utf8');
+          if (fieldNum === 3) destId = s.toString('utf8');
+          if (fieldNum === 4) ns = s.toString('utf8');
+          if (fieldNum === 6) payload = s.toString('utf8');
+        } else {
+          break;
+        }
+      }
+      msgs.push({ sourceId, destId, ns, payload });
+    }
+    return { msgs, remaining: buffer.slice(offset) };
+  }
+
+  async function castToGoogleCastDevice(dev) {
+    disconnectActiveCastClient();
+
+    const host = dev.ip;
+    const port = 8009;
+    const primaryIp = getPrimaryLocalIp();
+    const streamUrl = `http://${primaryIp}:${assignedPort}/preview.jpg`;
+
+    return new Promise((resolve) => {
+      let resolved = false;
+      let rxBuf = Buffer.alloc(0);
+      let transportId = null;
+      let reqId = 2;
+
+      const finish = (result) => {
+        if (resolved) return;
+        resolved = true;
+        resolve(result);
+      };
+
+      const timer = setTimeout(() => {
+        finish({ success: false, error: 'Cast device connection timed out' });
+      }, 9000);
+
+      try {
+        const socket = tls.connect(port, host, { rejectUnauthorized: false }, () => {
+          socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.tp.connection', JSON.stringify({ type: 'CONNECT' })));
+          socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.tp.heartbeat', JSON.stringify({ type: 'PING' })));
+          socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.receiver', JSON.stringify({ type: 'LAUNCH', appId: 'CC1AD845', requestId: 1 })));
+        });
+
+        const pingInterval = setInterval(() => {
+          if (socket && !socket.destroyed) {
+            socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.tp.heartbeat', JSON.stringify({ type: 'PING' })));
+            if (transportId) {
+              socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.tp.heartbeat', JSON.stringify({ type: 'PING' })));
+            }
+          }
+        }, 2500);
+
+        let updateInterval = null;
+
+        socket.on('data', (chunk) => {
+          rxBuf = Buffer.concat([rxBuf, chunk]);
+          const { msgs, remaining } = decodeCastMessages(rxBuf);
+          rxBuf = remaining;
+
+          for (const m of msgs) {
+            try {
+              const parsed = JSON.parse(m.payload);
+              if (parsed.type === 'RECEIVER_STATUS' && parsed.status?.applications) {
+                const app = parsed.status.applications.find((a) => a.appId === 'CC1AD845');
+                if (app && !transportId) {
+                  transportId = app.transportId;
+                  socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.tp.connection', JSON.stringify({ type: 'CONNECT' })));
+
+                  const loadPayload = {
+                    type: 'LOAD',
+                    requestId: reqId++,
+                    autoplay: true,
+                    media: {
+                      contentId: `${streamUrl}?t=${Date.now()}`,
+                      contentType: 'image/jpeg',
+                      streamType: 'BUFFERED',
+                      metadata: {
+                        type: 0,
+                        metadataType: 0,
+                        title: 'Brisk Cast — Live Screen',
+                      },
+                    },
+                  };
+
+                  socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.media', JSON.stringify(loadPayload)));
+
+                  updateInterval = setInterval(() => {
+                    if (isStreaming && !isPaused && socket && !socket.destroyed && transportId) {
+                      const refreshLoad = {
+                        type: 'LOAD',
+                        requestId: reqId++,
+                        autoplay: true,
+                        media: {
+                          contentId: `${streamUrl}?t=${Date.now()}`,
+                          contentType: 'image/jpeg',
+                          streamType: 'BUFFERED',
+                          metadata: {
+                            type: 0,
+                            metadataType: 0,
+                            title: 'Brisk Cast — Live Screen',
+                          },
+                        },
+                      };
+                      socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.media', JSON.stringify(refreshLoad)));
+                    }
+                  }, 1200);
+
+                  activeCastClient = {
+                    socket,
+                    pingInterval,
+                    updateInterval,
+                    transportId,
+                    ip: host,
+                    deviceName: dev.name,
+                  };
+
+                  clearTimeout(timer);
+                  finish({ success: true, deviceName: dev.name, deviceId: dev.id });
+                }
+              }
+            } catch {}
+          }
+        });
+
+        socket.on('error', (err) => {
+          clearTimeout(timer);
+          finish({ success: false, error: err.message });
+        });
+
+        socket.on('close', () => {
+          if (activeCastClient && activeCastClient.socket === socket) {
+            disconnectActiveCastClient();
+          }
+        });
+      } catch (err) {
+        clearTimeout(timer);
+        finish({ success: false, error: err.message });
+      }
+    });
+  }
+
+  async function castToDevice(deviceId) {
+    const dev = discoveredDevices.find((d) => d.id === deviceId);
+    if (!dev) {
+      return { success: false, error: 'Device not found' };
+    }
+
+    if (!isStreaming) {
+      await start({ source: currentSource || 'screen', quality: jpegQuality, fps: targetFps });
+    }
+
+    if (dev.controlUrl) {
+      return await castToDlnaDevice(deviceId);
+    }
+
+    if (dev.type === 'chromecast' || dev.type === 'dial' || dev.ip) {
+      return await castToGoogleCastDevice(dev);
+    }
+
+    return { success: false, error: 'Unsupported cast protocol for device' };
+  }
+
+  // -------------------------------------------------------------------------
   // Public Control APIs
   // -------------------------------------------------------------------------
 
-  async function start({ source = 'tab', quality = 75, fps = 30 } = {}) {
+  async function start({ source = 'screen', quality = 75, fps = 30 } = {}) {
     currentSource = source;
     jpegQuality = Math.max(30, Math.min(95, quality));
     targetFps = Math.max(10, Math.min(60, fps));
@@ -1488,6 +1731,7 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
     isStreaming = false;
     isPaused = false;
     stopCaptureLoop();
+    disconnectActiveCastClient();
 
     // Close all connected streaming clients
     for (const socket of activeWsClients) {
@@ -1584,6 +1828,7 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
     setActiveTab,
     discoverDevices,
     probeDeviceIp,
+    castToDevice,
     castToDlnaDevice,
     getPrimaryLocalIp,
   };
