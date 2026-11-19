@@ -183,6 +183,10 @@ const bmPopupName         = document.getElementById('bmpopupname');
 const bmPopupUrl          = document.getElementById('bmpopupurl');
 const bmPopupRemove       = document.getElementById('bmpopupremove');
 const bmPopupDone         = document.getElementById('bmpopupdone');
+
+const castBtnEl   = document.getElementById('castbtn');
+const castDotEl   = document.getElementById('castdot');
+const castPanelEl = document.getElementById('castpanel');
 const bmContextMenu       = document.getElementById('bmcontextmenu');
 const bmCtxOpen           = document.getElementById('bmctxopen');
 const bmCtxNewTab         = document.getElementById('bmctxnewtab');
@@ -501,6 +505,7 @@ function createTab(url = homeUrl(), { activate = true, isPrivate = false } = {})
     tab.title = e.title;
     titleEl.textContent = e.title;
     el.title = e.title;
+    if (tab.id === activeId) syncCastActiveTab();
   });
 
   view.addEventListener('page-favicon-updated', (e) => {
@@ -528,7 +533,11 @@ function createTab(url = homeUrl(), { activate = true, isPrivate = false } = {})
 
   const onNavigate = (e) => {
     if (e.url) tab.url = e.url;
-    if (id === activeId) { urlEdited = false; syncToolbar(); }
+    if (id === activeId) {
+      urlEdited = false;
+      syncToolbar();
+      syncCastActiveTab();
+    }
   };
 
   view.addEventListener('did-navigate', (e) => {
@@ -585,6 +594,7 @@ function activateTab(id) {
     t.wrap.classList.toggle('active', on);
   }
   syncToolbar();
+  syncCastActiveTab();
 }
 
 function closeTab(id) {
@@ -650,6 +660,7 @@ function syncToolbar() {
 
   syncShield();
   syncBookmarkStar();
+  syncCastButton();
 }
 
 function navigate(input) {
@@ -737,6 +748,7 @@ const ACTIONS = {
 
   'toggle-bookmark': () => toggleBookmarkCurrentTab(),
   'toggle-bookmarks-bar': () => toggleBookmarksBar(),
+  'toggle-cast': () => toggleCastPanel(),
 };
 
 // Moving to a different tab should put the caret in that page, so the next
@@ -765,6 +777,7 @@ function shortcutFor(e) {
     if (key === 'r') return [e.shiftKey ? 'hard-reload' : 'reload'];
     if (key === 'd') return ['toggle-bookmark'];
     if (key === 'b' && e.shiftKey) return ['toggle-bookmarks-bar'];
+    if (key === 'k' && e.shiftKey) return ['toggle-cast'];
     if (key === 'tab') return ['cycle-tab', { step: e.shiftKey ? -1 : 1 }];
     if (key === 'delete' && e.shiftKey) return ['clear-data'];
   }
@@ -772,6 +785,7 @@ function shortcutFor(e) {
   if (e.altKey && !ctrl) {
     if (key === 'arrowleft') return ['back'];
     if (key === 'arrowright') return ['forward'];
+    if (key === 'c') return ['toggle-cast'];
   }
 
   return null;
@@ -908,6 +922,7 @@ engineBtn.addEventListener('click', (e) => {
   closeBookmarkPopup();
   closeBookmarksPanel();
   closeBookmarkContextMenu();
+  closeCastPanel();
   engineMenu.classList.toggle('open');
 });
 
@@ -1242,6 +1257,7 @@ shieldEl.addEventListener('click', (e) => {
   closeBookmarkPopup();
   closeBookmarksPanel();
   closeBookmarkContextMenu();
+  closeCastPanel();
   const opening = !panelEl.classList.contains('open');
   panelEl.classList.toggle('open', opening);
   if (opening) {
@@ -1501,6 +1517,7 @@ if (extBtnEl) {
     closeBookmarkPopup();
     closeBookmarksPanel();
     closeBookmarkContextMenu();
+    closeCastPanel();
     const opening = !extPanelEl.classList.contains('open');
     extPanelEl.classList.toggle('open', opening);
     extBtnEl.classList.toggle('active', opening);
@@ -1564,6 +1581,7 @@ function openBookmarkPopup(bookmark, isNew = false) {
   closeExtensionsPanel();
   closeBookmarksPanel();
   closeBookmarkContextMenu();
+  closeCastPanel();
 
   editingBookmarkId = bookmark.id || null;
   bmPopupTitle.textContent = isNew ? 'Bookmark added' : 'Edit bookmark';
@@ -1936,6 +1954,7 @@ if (bookmarksBtn) {
     closeExtensionsPanel();
     closeBookmarkPopup();
     closeBookmarkContextMenu();
+    closeCastPanel();
     const opening = !bookmarksPanelEl.classList.contains('open');
     bookmarksPanelEl.classList.toggle('open', opening);
     bookmarksBtn.classList.toggle('active', opening);
@@ -2016,6 +2035,7 @@ window.addEventListener('click', () => {
   closeBookmarkPopup();
   closeBookmarksPanel();
   closeBookmarkContextMenu();
+  closeCastPanel();
 });
 
 window.addEventListener('keydown', (e) => {
@@ -2023,8 +2043,445 @@ window.addEventListener('keydown', (e) => {
     closeBookmarkPopup();
     closeBookmarksPanel();
     closeBookmarkContextMenu();
+    closeCastPanel();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Screen and Tab Casting
+// ---------------------------------------------------------------------------
+
+let castStatus = {
+  isStreaming: false,
+  isPaused: false,
+  source: 'tab',
+  fps: 30,
+  targetFps: 30,
+  quality: 75,
+  port: 8554,
+  url: 'http://127.0.0.1:8554',
+  clientCount: 0,
+  title: 'Active Tab',
+  uptimeSec: 0,
+  totalFramesSent: 0,
+  qrSvg: '',
+};
+
+let castDevices = [];
+let isScanningDevices = false;
+let selectedCastSource = 'tab'; // 'tab' | 'screen' | 'window'
+let selectedQualityPreset = '1080p'; // '1080p' | '60fps' | 'eco'
+
+function syncCastButton() {
+  if (!castBtnEl) return;
+  const isLive = Boolean(castStatus && castStatus.isStreaming);
+  castBtnEl.classList.toggle('streaming', isLive);
+  if (castDotEl) castDotEl.style.display = isLive ? 'block' : 'none';
+
+  if (isLive) {
+    castBtnEl.title = `Casting ${castStatus.source} (${castStatus.clientCount} viewing) — Alt+C`;
+  } else {
+    castBtnEl.title = 'Cast screen or tab to other devices (Alt+C)';
+  }
+}
+
+function syncCastActiveTab() {
+  if (!API.setCastActiveTab) return;
+  const tab = activeTab();
+  if (!tab) return;
+  const wcId = webContentsIdOf(tab);
+  API.setCastActiveTab({
+    tabId: wcId,
+    title: tab.title || 'Tab',
+    url: tab.url,
+  });
+}
+
+function closeCastPanel() {
+  if (castPanelEl) castPanelEl.classList.remove('open');
+  if (castBtnEl) castBtnEl.classList.remove('active');
+}
+
+function openCastPanel() {
+  closePrivacyPanel();
+  closeEngineMenu();
+  closeExtensionsPanel();
+  closeBookmarkPopup();
+  closeBookmarksPanel();
+  closeBookmarkContextMenu();
+  if (castPanelEl) castPanelEl.classList.add('open');
+  if (castBtnEl) castBtnEl.classList.add('active');
+  renderCastPanel();
+
+  if (castDevices.length === 0 && API.discoverCastDevices) {
+    API.discoverCastDevices().then((list) => {
+      if (Array.isArray(list)) {
+        castDevices = list;
+        if (castPanelEl && castPanelEl.classList.contains('open')) renderCastPanel();
+      }
+    }).catch(() => {});
+  }
+}
+
+function toggleCastPanel() {
+  if (castPanelEl && castPanelEl.classList.contains('open')) {
+    closeCastPanel();
+  } else {
+    openCastPanel();
+  }
+}
+
+async function applyCastConfig() {
+  let fps = 30;
+  let quality = 75;
+  if (selectedQualityPreset === '60fps') {
+    fps = 60;
+    quality = 65;
+  } else if (selectedQualityPreset === 'eco') {
+    fps = 15;
+    quality = 60;
+  }
+
+  if (API.startCast) {
+    syncCastActiveTab();
+    const res = await API.startCast({
+      source: selectedCastSource,
+      quality,
+      fps,
+    });
+    if (res) castStatus = res;
+    syncCastButton();
+    renderCastPanel();
+  }
+}
+
+function renderCastPanel() {
+  if (!castPanelEl) return;
+  castPanelEl.textContent = '';
+
+  // --- Header ---
+  const head = document.createElement('div');
+  head.className = 'cp-head';
+  const titleWrap = document.createElement('div');
+  titleWrap.className = 'cp-title-wrap';
+
+  const title = document.createElement('span');
+  title.className = 'cp-title';
+  title.textContent = 'Cast to device';
+
+  const badge = document.createElement('span');
+  badge.className = 'cp-badge' + (castStatus.isStreaming ? ' live' : '');
+  badge.textContent = castStatus.isStreaming
+    ? (castStatus.isPaused ? 'Paused' : `LIVE${castStatus.clientCount > 0 ? ` (${castStatus.clientCount})` : ''}`)
+    : 'Ready';
+
+  titleWrap.append(title, badge);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'cp-close-btn';
+  closeBtn.textContent = '×';
+  closeBtn.title = 'Close';
+  closeBtn.addEventListener('click', closeCastPanel);
+
+  head.append(titleWrap, closeBtn);
+  castPanelEl.appendChild(head);
+
+  // --- Section 1: Source Selection ---
+  const sourceSection = document.createElement('div');
+  sourceSection.className = 'cp-section';
+  const sourceTitle = document.createElement('div');
+  sourceTitle.className = 'cp-section-title';
+  sourceTitle.textContent = 'What to cast';
+  sourceSection.appendChild(sourceTitle);
+
+  const sourceChips = document.createElement('div');
+  sourceChips.className = 'cp-source-chips';
+
+  const sources = [
+    { id: 'tab', name: 'Active Tab', icon: '<path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V7h14v12z"/>' },
+    { id: 'screen', name: 'Entire Screen', icon: '<path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/>' },
+    { id: 'window', name: 'Browser Window', icon: '<path d="M19 4H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H5V8h14v10z"/>' },
+  ];
+
+  for (const s of sources) {
+    const btn = document.createElement('button');
+    btn.className = 'cp-source-btn' + (selectedCastSource === s.id ? ' active' : '');
+    btn.innerHTML = `<svg viewBox="0 0 24 24">${s.icon}</svg><span>${s.name}</span>`;
+    btn.addEventListener('click', () => {
+      selectedCastSource = s.id;
+      if (castStatus.isStreaming) {
+        applyCastConfig();
+      } else {
+        renderCastPanel();
+      }
+    });
+    sourceChips.appendChild(btn);
+  }
+  sourceSection.appendChild(sourceChips);
+
+  // Quality presets row
+  const qualityRow = document.createElement('div');
+  qualityRow.className = 'cp-quality-row';
+  const presets = [
+    { id: '1080p', label: '1080p (30fps)' },
+    { id: '60fps', label: '720p (60fps)' },
+    { id: 'eco', label: 'Eco (15fps)' },
+  ];
+  for (const p of presets) {
+    const chip = document.createElement('button');
+    chip.className = 'cp-quality-chip' + (selectedQualityPreset === p.id ? ' active' : '');
+    chip.textContent = p.label;
+    chip.addEventListener('click', () => {
+      selectedQualityPreset = p.id;
+      if (castStatus.isStreaming) {
+        applyCastConfig();
+      } else {
+        renderCastPanel();
+      }
+    });
+    qualityRow.appendChild(chip);
+  }
+  sourceSection.appendChild(qualityRow);
+
+  // Action buttons (Start / Stop / Pause)
+  const actionRow = document.createElement('div');
+  actionRow.className = 'cp-action-row';
+
+  if (!castStatus.isStreaming) {
+    const startBtn = document.createElement('button');
+    startBtn.className = 'cp-start-btn';
+    startBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Start Casting';
+    startBtn.addEventListener('click', async () => {
+      startBtn.textContent = 'Starting…';
+      await applyCastConfig();
+    });
+    actionRow.appendChild(startBtn);
+  } else {
+    const stopBtn = document.createElement('button');
+    stopBtn.className = 'cp-stop-btn';
+    stopBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M6 6h12v12H6z"/></svg> Stop Casting';
+    stopBtn.addEventListener('click', async () => {
+      if (API.stopCast) {
+        const res = await API.stopCast();
+        if (res) castStatus = res;
+        syncCastButton();
+        renderCastPanel();
+      }
+    });
+    actionRow.appendChild(stopBtn);
+
+    const pauseBtn = document.createElement('button');
+    pauseBtn.className = 'cp-pause-btn';
+    pauseBtn.textContent = castStatus.isPaused ? 'Resume' : 'Pause';
+    pauseBtn.addEventListener('click', async () => {
+      if (API.toggleCastPause) {
+        castStatus.isPaused = await API.toggleCastPause();
+        renderCastPanel();
+      }
+    });
+    actionRow.appendChild(pauseBtn);
+  }
+  sourceSection.appendChild(actionRow);
+  castPanelEl.appendChild(sourceSection);
+
+  // --- Section 2: Direct Cast (URL & QR Code) ---
+  const connectSection = document.createElement('div');
+  connectSection.className = 'cp-section';
+
+  const connectTitle = document.createElement('div');
+  connectTitle.className = 'cp-section-title';
+  connectTitle.textContent = 'Direct Cast (Phone, TV, Tablet)';
+  connectSection.appendChild(connectTitle);
+
+  const card = document.createElement('div');
+  card.className = 'cp-connect-card';
+
+  const urlRow = document.createElement('div');
+  urlRow.className = 'cp-url-row';
+
+  const urlDisplay = document.createElement('div');
+  urlDisplay.className = 'cp-url-display';
+  urlDisplay.textContent = castStatus.url || 'http://localhost:8554';
+  urlDisplay.title = 'Open this URL on any device connected to the same Wi-Fi';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'cp-copy-btn';
+  copyBtn.textContent = 'Copy';
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(castStatus.url || '').then(() => {
+      copyBtn.textContent = 'Copied!';
+      copyBtn.classList.add('copied');
+      setTimeout(() => {
+        copyBtn.textContent = 'Copy';
+        copyBtn.classList.remove('copied');
+      }, 1800);
+    });
+  });
+
+  const openBtn = document.createElement('button');
+  openBtn.className = 'cp-open-btn';
+  openBtn.textContent = 'Open';
+  openBtn.title = 'Open receiver in a new tab';
+  openBtn.addEventListener('click', () => {
+    createTab(castStatus.url);
+  });
+
+  urlRow.append(urlDisplay, copyBtn, openBtn);
+  card.appendChild(urlRow);
+
+  // Embedded QR Code
+  if (castStatus.qrSvg) {
+    const qrWrap = document.createElement('div');
+    qrWrap.className = 'cp-qr-wrap';
+    const qrImg = document.createElement('div');
+    qrImg.className = 'cp-qr-svg';
+    qrImg.innerHTML = castStatus.qrSvg;
+    const caption = document.createElement('div');
+    caption.className = 'cp-qr-caption';
+    caption.textContent = 'Scan with camera on phone or Smart TV to view stream';
+    qrWrap.append(qrImg, caption);
+    card.appendChild(qrWrap);
+  }
+  connectSection.appendChild(card);
+  castPanelEl.appendChild(connectSection);
+
+  // --- Section 3: Smart TVs & Cast Devices ---
+  const devSection = document.createElement('div');
+  devSection.className = 'cp-section';
+
+  const devTitleRow = document.createElement('div');
+  devTitleRow.className = 'cp-section-title';
+  const devTitleText = document.createElement('span');
+  devTitleText.textContent = 'Smart TVs & Cast Devices';
+
+  const scanBtn = document.createElement('button');
+  scanBtn.className = 'cp-scan-btn' + (isScanningDevices ? ' scanning' : '');
+  scanBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 1 0 19.73 14h-2.08A6 6 0 1 1 12 6a5.9 5.9 0 0 1 4.22 1.78L13 11h7V4z"/></svg> <span>Scan</span>';
+  scanBtn.addEventListener('click', async () => {
+    isScanningDevices = true;
+    scanBtn.classList.add('scanning');
+    if (API.discoverCastDevices) {
+      const list = await API.discoverCastDevices();
+      if (Array.isArray(list)) castDevices = list;
+    }
+    setTimeout(() => {
+      isScanningDevices = false;
+      renderCastPanel();
+    }, 2000);
+  });
+
+  devTitleRow.append(devTitleText, scanBtn);
+  devSection.appendChild(devTitleRow);
+
+  const devList = document.createElement('div');
+  devList.className = 'cp-devices-list';
+
+  if (castDevices && castDevices.length > 0) {
+    for (const dev of castDevices) {
+      const item = document.createElement('div');
+      item.className = 'cp-device-item';
+
+      const info = document.createElement('div');
+      info.className = 'cp-device-info';
+
+      const icon = document.createElement('div');
+      icon.className = 'cp-device-icon';
+      icon.innerHTML = dev.type === 'chromecast'
+        ? '<svg viewBox="0 0 24 24"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.92-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>'
+        : '<svg viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>';
+
+      const texts = document.createElement('div');
+      texts.className = 'cp-device-texts';
+      const name = document.createElement('div');
+      name.className = 'cp-device-name';
+      name.textContent = dev.name || 'Smart TV';
+      const meta = document.createElement('div');
+      meta.className = 'cp-device-meta';
+      meta.textContent = `${dev.type.toUpperCase()} • ${dev.ip}`;
+      texts.append(name, meta);
+
+      info.append(icon, texts);
+
+      const actBtn = document.createElement('button');
+      actBtn.className = 'cp-device-action-btn';
+      if (dev.canDirectPlay) {
+        actBtn.textContent = 'Play on TV';
+        actBtn.addEventListener('click', async () => {
+          actBtn.textContent = 'Sending…';
+          if (!castStatus.isStreaming) {
+            await applyCastConfig();
+          }
+          if (API.castToDevice) {
+            const res = await API.castToDevice(dev.id);
+            actBtn.textContent = res && res.success ? 'Playing!' : 'Failed';
+            setTimeout(() => { actBtn.textContent = 'Play on TV'; }, 2500);
+          }
+        });
+      } else {
+        actBtn.textContent = 'Connect';
+        actBtn.addEventListener('click', () => {
+          navigator.clipboard.writeText(castStatus.url || '').then(() => {
+            actBtn.textContent = 'URL Copied!';
+            setTimeout(() => { actBtn.textContent = 'Connect'; }, 2000);
+          });
+        });
+      }
+
+      item.append(info, actBtn);
+      devList.appendChild(item);
+    }
+  } else {
+    const empty = document.createElement('div');
+    empty.className = 'cp-empty-state';
+    empty.textContent = 'No DLNA / Cast TVs detected yet. Open the link or scan the QR code above on any device on your Wi-Fi.';
+    devList.appendChild(empty);
+  }
+  devSection.appendChild(devList);
+  castPanelEl.appendChild(devSection);
+
+  // --- Live stats when streaming ---
+  if (castStatus.isStreaming) {
+    const statsGrid = document.createElement('div');
+    statsGrid.className = 'cp-stats-grid';
+
+    const fpsBox = document.createElement('div');
+    fpsBox.className = 'cp-stat-box';
+    fpsBox.innerHTML = `<div class="cp-stat-val">${castStatus.fps || targetFps}</div><div class="cp-stat-label">FPS</div>`;
+
+    const clientsBox = document.createElement('div');
+    clientsBox.className = 'cp-stat-box';
+    clientsBox.innerHTML = `<div class="cp-stat-val">${castStatus.clientCount}</div><div class="cp-stat-label">Receivers</div>`;
+
+    const timeBox = document.createElement('div');
+    timeBox.className = 'cp-stat-box';
+    const mins = String(Math.floor(castStatus.uptimeSec / 60)).padStart(2, '0');
+    const secs = String(castStatus.uptimeSec % 60).padStart(2, '0');
+    timeBox.innerHTML = `<div class="cp-stat-val">${mins}:${secs}</div><div class="cp-stat-label">Uptime</div>`;
+
+    statsGrid.append(fpsBox, clientsBox, timeBox);
+    castPanelEl.appendChild(statsGrid);
+  }
+}
+
+if (castBtnEl) {
+  castBtnEl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closePrivacyPanel();
+    closeEngineMenu();
+    closeExtensionsPanel();
+    closeBookmarkPopup();
+    closeBookmarksPanel();
+    closeBookmarkContextMenu();
+    const opening = !castPanelEl.classList.contains('open');
+    castPanelEl.classList.toggle('open', opening);
+    castBtnEl.classList.toggle('active', opening);
+    if (opening) renderCastPanel();
+  });
+}
+
+if (castPanelEl) {
+  castPanelEl.addEventListener('click', (e) => e.stopPropagation());
+}
 
 // --- Bridges from the main process ---
 if (API.hasTitleBarOverlay) {
@@ -2097,6 +2554,29 @@ if (API.onBookmarksChanged) {
   });
 }
 
+if (API.onCastStatusChanged) {
+  API.onCastStatusChanged((status) => {
+    if (status) {
+      castStatus = status;
+      syncCastButton();
+      if (castPanelEl && castPanelEl.classList.contains('open')) {
+        renderCastPanel();
+      }
+    }
+  });
+}
+
+if (API.onCastDevicesChanged) {
+  API.onCastDevicesChanged((devices) => {
+    if (Array.isArray(devices)) {
+      castDevices = devices;
+      if (castPanelEl && castPanelEl.classList.contains('open')) {
+        renderCastPanel();
+      }
+    }
+  });
+}
+
 // canGoBack()/canGoForward() have no change event, so poll them. Cheap.
 setInterval(syncToolbar, 400);
 
@@ -2128,6 +2608,13 @@ setInterval(syncToolbar, 400);
       renderBookmarksBar();
       syncBookmarkStar();
     } catch { /* ignore */ }
+  }
+  if (API.getCastStatus) {
+    try {
+      const status = await API.getCastStatus();
+      if (status) castStatus = status;
+      syncCastButton();
+    } catch {}
   }
   setEngine(engineId);
   createTab(homeUrl());

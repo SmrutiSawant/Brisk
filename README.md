@@ -149,6 +149,7 @@ Brisk includes the basic features you'd expect from a desktop browser:
 - Links using `target="_blank"` open in a new tab.
 - A minimal light interface with rounded tabs and a floating page layout.
 - Custom window controls integrated into the tab strip.
+- **Screen & Tab Casting:** Cast the active tab, entire desktop screen, or browser window to Smart TVs, phones, tablets, or other computers across the local Wi-Fi with zero installation on the receiver. Features an embedded low-latency WebSocket/MJPEG stream server, instant QR code scanning, UPnP/DLNA and Google Cast discovery, and direct 1-click playback on DLNA Smart TVs.
 
 ### Keyboard Shortcuts
 
@@ -165,6 +166,7 @@ Shortcuts work even when you're interacting with a website inside a tab.
 | `Ctrl+Shift+R` | Hard reload |
 | `Ctrl+D` | Bookmark / edit bookmark for current page |
 | `Ctrl+Shift+B` | Toggle bookmarks bar |
+| `Alt+C` / `Ctrl+Shift+K` | Cast screen or tab to other devices |
 | `Ctrl+Tab` | Switch to next tab |
 | `Ctrl+Shift+Tab` | Switch to previous tab |
 | `Alt+Left / Right` | Navigate back / forward |
@@ -185,6 +187,7 @@ The project is split into a few main files, with each one handling a specific pa
 | `preload.js` | Provides a limited and secure bridge between the main process and browser interface |
 | `index.html` | Contains the browser interface, including the tab strip, toolbar, privacy panel, and styling |
 | `renderer.js` | Handles tabs, navigation, URL parsing, keyboard shortcuts, and the privacy panel |
+| `cast.js` | Implements screen and tab casting, local WebSocket/MJPEG streaming, QR code generation, and DLNA/Cast discovery |
 | `bookmarks.js` | Handles persistent bookmark storage, validation, querying, and live notifications |
 | `newtab.html` | Defines the custom new tab page |
 | `newtab.js` | Handles new tab functionality and quick links |

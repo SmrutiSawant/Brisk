@@ -86,4 +86,20 @@ contextBridge.exposeInMainWorld('browserAPI', {
   onBookmarksChanged: (callback) => {
     ipcRenderer.on('bookmarks-changed', (_event, bookmarks) => callback(bookmarks));
   },
+
+  // --- Screen & Tab Casting ---
+  getCastStatus: () => ipcRenderer.invoke('get-cast-status'),
+  getCastSources: () => ipcRenderer.invoke('get-cast-sources'),
+  startCast: (options) => ipcRenderer.invoke('start-cast', options),
+  stopCast: () => ipcRenderer.invoke('stop-cast'),
+  toggleCastPause: () => ipcRenderer.invoke('toggle-cast-pause'),
+  discoverCastDevices: () => ipcRenderer.invoke('discover-cast-devices'),
+  castToDevice: (deviceId) => ipcRenderer.invoke('cast-to-device', deviceId),
+  setCastActiveTab: (info) => ipcRenderer.send('set-cast-active-tab', info),
+  onCastStatusChanged: (callback) => {
+    ipcRenderer.on('cast-status-changed', (_event, status) => callback(status));
+  },
+  onCastDevicesChanged: (callback) => {
+    ipcRenderer.on('cast-devices-changed', (_event, devices) => callback(devices));
+  },
 });

@@ -17,6 +17,7 @@ const {
 } = require('./privacy');
 const { createExtensionManager } = require('./extensions');
 const { createBookmarkManager } = require('./bookmarks');
+const { createCastManager } = require('./cast');
 
 // --- Chromium switches. Must be set before the app is ready. ---
 
@@ -383,6 +384,53 @@ ipcMain.handle('is-bookmarked', (event, url) => {
 });
 
 // ---------------------------------------------------------------------------
+// Screen and Tab Casting
+// ---------------------------------------------------------------------------
+let castManager = null;
+let currentActiveTabWcId = null;
+
+ipcMain.handle('get-cast-status', (event) => {
+  if (!fromUI(event) || !castManager) return null;
+  return castManager.getStatus();
+});
+
+ipcMain.handle('get-cast-sources', async (event) => {
+  if (!fromUI(event) || !castManager) return {};
+  return await castManager.getSources();
+});
+
+ipcMain.handle('start-cast', async (event, options) => {
+  if (!fromUI(event) || !castManager) return { isStreaming: false };
+  return await castManager.start(options);
+});
+
+ipcMain.handle('stop-cast', (event) => {
+  if (!fromUI(event) || !castManager) return { isStreaming: false };
+  return castManager.stop();
+});
+
+ipcMain.handle('toggle-cast-pause', (event) => {
+  if (!fromUI(event) || !castManager) return false;
+  return castManager.togglePause();
+});
+
+ipcMain.handle('discover-cast-devices', (event) => {
+  if (!fromUI(event) || !castManager) return [];
+  return castManager.discoverDevices();
+});
+
+ipcMain.handle('cast-to-device', async (event, deviceId) => {
+  if (!fromUI(event) || !castManager || typeof deviceId !== 'string') return { success: false };
+  return await castManager.castToDlnaDevice(deviceId);
+});
+
+ipcMain.on('set-cast-active-tab', (event, info) => {
+  if (!fromUI(event) || !info) return;
+  if (typeof info.tabId === 'number') currentActiveTabWcId = info.tabId;
+  if (castManager) castManager.setActiveTab(info);
+});
+
+// ---------------------------------------------------------------------------
 // Window
 // ---------------------------------------------------------------------------
 
@@ -483,7 +531,7 @@ function createWindow() {
 // main window has to be given focus first, or the keystroke lands in a page
 // that is no longer in front.
 
-const FOCUS_UI = new Set(['new-tab', 'new-private-tab', 'focus-omnibox', 'toggle-bookmark']);
+const FOCUS_UI = new Set(['new-tab', 'new-private-tab', 'focus-omnibox', 'toggle-bookmark', 'toggle-cast']);
 
 function matchShortcut(input) {
   const ctrl = input.control || input.meta;
@@ -497,6 +545,7 @@ function matchShortcut(input) {
     if (key === 'r') return { action: input.shift ? 'hard-reload' : 'reload' };
     if (key === 'd') return { action: 'toggle-bookmark' };
     if (key === 'b' && input.shift) return { action: 'toggle-bookmarks-bar' };
+    if (key === 'k' && input.shift) return { action: 'toggle-cast' };
     if (key === 'tab') return { action: 'cycle-tab', step: input.shift ? -1 : 1 };
     if (key === 'delete' && input.shift) return { action: 'clear-data' };
   }
@@ -504,6 +553,7 @@ function matchShortcut(input) {
   if (input.alt && !ctrl) {
     if (key === 'arrowleft') return { action: 'back' };
     if (key === 'arrowright') return { action: 'forward' };
+    if (key === 'c') return { action: 'toggle-cast' };
   }
 
   return null;
@@ -733,6 +783,22 @@ app.whenReady().then(async () => {
   });
   bookmarkManager.loadSaved();
 
+  castManager = createCastManager({
+    getActiveTabWebContents: () => {
+      if (typeof currentActiveTabWcId === 'number') {
+        try {
+          const wc = webContents.fromId(currentActiveTabWcId);
+          if (wc && !wc.isDestroyed()) return wc;
+        } catch {}
+      }
+      const all = webContents.getAllWebContents();
+      return all.find((w) => !w.isDestroyed() && w.getType() === 'webview') || null;
+    },
+    getMainWindow: () => mainWindow,
+    userDataPath: app.getPath('userData'),
+    notify: send,
+  });
+
   createWindow();
 
   app.on('activate', () => {
@@ -747,6 +813,10 @@ let cleanupDone = false;
 app.on('before-quit', (event) => {
   if (cleanupDone) return;
   event.preventDefault();
+
+  if (castManager) {
+    try { castManager.stop(); } catch {}
+  }
 
   const targets = [session.fromPartition(`persist:${PRIVATE_PARTITION}`)];
   if (settings.clearOnExit) targets.push(session.defaultSession);

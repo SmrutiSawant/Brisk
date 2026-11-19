@@ -1250,6 +1250,420 @@
     height: 100%;
     border: 0;
   }
+
+  /* ---------- Cast Button & Panel ---------- */
+  #castbtn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-dim);
+    display: grid;
+    place-items: center;
+    position: relative;
+    cursor: default;
+    transition: background .12s, color .12s;
+  }
+  #castbtn:hover { background: rgba(0,0,0,.08); color: var(--text); }
+  #castbtn.active { background: rgba(0,0,0,.12); color: var(--text); }
+  #castbtn svg { width: 16px; height: 16px; fill: currentColor; }
+
+  #castbtn.streaming {
+    color: var(--text);
+    background: rgba(0,0,0,.08);
+  }
+  #castdot {
+    position: absolute;
+    top: 5px; right: 5px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #e53e3e;
+    box-shadow: 0 0 0 2px var(--toolbar-bg);
+    display: none;
+  }
+  #castbtn.streaming #castdot {
+    display: block;
+    animation: castPulse 1.5s infinite;
+  }
+  @keyframes castPulse {
+    0% { transform: scale(0.9); opacity: 0.7; }
+    50% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 6px rgba(229, 62, 62, 0.8); }
+    100% { transform: scale(0.9); opacity: 0.7; }
+  }
+
+  /* Popover Dialog */
+  #castpanel {
+    position: absolute;
+    top: 84px;
+    right: 8px;
+    z-index: 12;
+    width: 360px;
+    max-height: calc(100% - 100px);
+    overflow-y: auto;
+    padding: 12px;
+    border-radius: 12px;
+    background: var(--tab-active);
+    box-shadow: 0 0 0 1px var(--border), 0 12px 32px rgba(0,0,0,.18);
+    display: none;
+  }
+  #castpanel.open { display: block; }
+
+  .cp-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cp-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .cp-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .cp-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 10px;
+    background: rgba(0,0,0,.06);
+    color: var(--text-dim);
+  }
+  .cp-badge.live {
+    background: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fca5a5;
+  }
+  .cp-close-btn {
+    width: 22px; height: 22px;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 15px;
+    line-height: 1;
+    display: grid;
+    place-items: center;
+    cursor: default;
+  }
+  .cp-close-btn:hover { background: var(--tab-hover); color: var(--text); }
+
+  .cp-section {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .cp-section-title {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  /* Source chips */
+  .cp-source-chips {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 6px;
+  }
+  .cp-source-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 8px 4px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 11px;
+    cursor: default;
+    transition: all .12s ease;
+  }
+  .cp-source-btn svg { width: 16px; height: 16px; fill: currentColor; }
+  .cp-source-btn:hover { background: var(--tab-hover); border-color: #bbb; }
+  .cp-source-btn.active {
+    background: var(--text);
+    color: var(--tab-active);
+    border-color: var(--text);
+  }
+
+  /* Quality chips */
+  .cp-quality-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .cp-quality-chip {
+    flex: 1;
+    padding: 4px 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-dim);
+    font: inherit;
+    font-size: 10.5px;
+    text-align: center;
+    cursor: default;
+  }
+  .cp-quality-chip:hover { background: var(--tab-hover); color: var(--text); }
+  .cp-quality-chip.active {
+    background: rgba(0,0,0,.08);
+    color: var(--text);
+    font-weight: 600;
+    border-color: var(--text);
+  }
+
+  /* Big Action Button */
+  .cp-action-row {
+    padding-top: 10px;
+    display: flex;
+    gap: 8px;
+  }
+  .cp-start-btn {
+    flex: 1;
+    height: 32px;
+    border: 0;
+    border-radius: 7px;
+    background: var(--text);
+    color: var(--tab-active);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: default;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: opacity .12s;
+  }
+  .cp-start-btn:hover { opacity: .9; }
+  .cp-stop-btn {
+    flex: 1;
+    height: 32px;
+    border: 1px solid #ef4444;
+    border-radius: 7px;
+    background: #fee2e2;
+    color: #b91c1c;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: default;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all .12s;
+  }
+  .cp-stop-btn:hover { background: #fecaca; }
+  .cp-pause-btn {
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 11px;
+    cursor: default;
+  }
+  .cp-pause-btn:hover { background: var(--tab-hover); }
+
+  /* Direct Connect & QR Card */
+  .cp-connect-card {
+    background: rgba(0,0,0,.03);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-top: 6px;
+  }
+  .cp-url-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .cp-url-display {
+    flex: 1;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 11.5px;
+    color: var(--text);
+    padding: 4px 6px;
+    background: var(--tab-active);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cp-copy-btn, .cp-open-btn {
+    height: 26px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--tab-active);
+    color: var(--text);
+    font: inherit;
+    font-size: 11px;
+    cursor: default;
+    white-space: nowrap;
+  }
+  .cp-copy-btn:hover, .cp-open-btn:hover { background: var(--tab-hover); }
+  .cp-copy-btn.copied { background: var(--text); color: var(--tab-active); }
+
+  /* QR Code Frame */
+  .cp-qr-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    margin-top: 8px;
+    padding: 8px;
+    background: var(--tab-active);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .cp-qr-svg {
+    width: 140px;
+    height: 140px;
+    display: block;
+  }
+  .cp-qr-caption {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 6px;
+    text-align: center;
+  }
+
+  /* Discovered Smart TVs & Cast Devices */
+  .cp-devices-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+    max-height: 150px;
+    overflow-y: auto;
+  }
+  .cp-device-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--tab-active);
+    gap: 8px;
+  }
+  .cp-device-item:hover { background: var(--tab-hover); }
+  .cp-device-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+  }
+  .cp-device-icon {
+    width: 20px; height: 20px;
+    flex: 0 0 20px;
+    color: var(--text);
+    display: grid;
+    place-items: center;
+  }
+  .cp-device-icon svg { width: 16px; height: 16px; fill: currentColor; }
+  .cp-device-texts {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .cp-device-name {
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cp-device-meta {
+    font-size: 9.5px;
+    color: var(--text-dim);
+  }
+  .cp-device-action-btn {
+    height: 24px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--tab-active);
+    color: var(--text);
+    font: inherit;
+    font-size: 10.5px;
+    font-weight: 500;
+    cursor: default;
+    white-space: nowrap;
+  }
+  .cp-device-action-btn:hover { background: var(--text); color: var(--tab-active); }
+
+  .cp-empty-state {
+    padding: 8px;
+    font-size: 11px;
+    color: var(--text-dim);
+    text-align: center;
+  }
+
+  .cp-scan-btn {
+    background: transparent;
+    border: 0;
+    color: var(--text-dim);
+    cursor: default;
+    font: inherit;
+    font-size: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 5px;
+    border-radius: 4px;
+  }
+  .cp-scan-btn:hover { background: var(--tab-hover); color: var(--text); }
+  .cp-scan-btn.scanning svg { animation: spin .7s linear infinite; }
+  .cp-scan-btn svg { width: 10px; height: 10px; fill: currentColor; }
+
+  /* Stats row when live */
+  .cp-stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .cp-stat-box {
+    background: rgba(0,0,0,.03);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px;
+    text-align: center;
+  }
+  .cp-stat-val {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .cp-stat-label {
+    font-size: 9.5px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
 </style>
 </head>
 <body>
@@ -1305,6 +1719,11 @@
         <svg viewBox="0 0 24 24"><path d="M19 18l2 1V3c0-1.1-.9-2-2-2H8.99C7.89 1 7 1.9 7 3h10c1.1 0 2 .9 2 2v13zM15 5H5c-1.1 0-2 .9-2 2v16l7-3 7 3V7c0-1.1-.9-2-2-2z"/></svg>
       </button>
 
+      <button id="castbtn" title="Cast screen or tab to other devices (Alt+C)">
+        <svg viewBox="0 0 24 24"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.92-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
+        <span id="castdot"></span>
+      </button>
+
       <button id="shield" title="Privacy for this site">
         <svg viewBox="0 0 24 24"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
         <span id="blockcount">0</span>
@@ -1351,6 +1770,9 @@
 
     <!-- Populated by renderer.js for bookmark management. -->
     <div id="bookmarkspanel"></div>
+
+    <!-- Populated by renderer.js for screen and tab casting. -->
+    <div id="castpanel"></div>
 
     <!-- Context menu for bookmark items -->
     <div id="bmcontextmenu">
