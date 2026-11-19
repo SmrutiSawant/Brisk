@@ -226,10 +226,10 @@ function generateSvgQr(text, cellSize = 6, margin = 4) {
         }
       }
     }
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalSize} ${totalSize}" width="${totalSize}" height="${totalSize}"><rect width="100%" height="100%" fill="#ffffff" rx="6"/><path d="${paths.join(' ')}" fill="#111111"/></svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalSize} ${totalSize}" width="100%" height="100%"><rect width="100%" height="100%" fill="#ffffff" rx="6"/><path d="${paths.join(' ')}" fill="#111111"/></svg>`;
   } catch (err) {
     console.error('[cast] QR generation failed:', err.message);
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100%" height="100%" fill="#eeeeee"/><text x="50" y="55" font-size="12" text-anchor="middle" fill="#666">QR Error</text></svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%"><rect width="100%" height="100%" fill="#eeeeee"/><text x="50" y="55" font-size="12" text-anchor="middle" fill="#666">QR Error</text></svg>`;
   }
 }
 

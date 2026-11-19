@@ -2429,6 +2429,11 @@ function renderCastPanel() {
     const qrImg = document.createElement('div');
     qrImg.className = 'cp-qr-svg';
     qrImg.innerHTML = castStatus.qrSvg;
+    const svgEl = qrImg.querySelector('svg');
+    if (svgEl) {
+      svgEl.setAttribute('width', '100%');
+      svgEl.setAttribute('height', '100%');
+    }
     const caption = document.createElement('div');
     caption.className = 'cp-qr-caption';
     caption.textContent = 'Scan with camera on phone or Smart TV to view stream';

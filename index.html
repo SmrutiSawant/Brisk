@@ -1531,21 +1531,35 @@
     align-items: center;
     justify-content: center;
     margin-top: 8px;
-    padding: 8px;
+    padding: 10px;
     background: var(--tab-active);
     border: 1px solid var(--border);
     border-radius: 6px;
+    box-sizing: border-box;
   }
   .cp-qr-svg {
     width: 140px;
     height: 140px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+  .cp-qr-svg svg {
+    width: 100%;
+    height: 100%;
+    max-width: 140px;
+    max-height: 140px;
     display: block;
+    border-radius: 4px;
   }
   .cp-qr-caption {
     font-size: 10px;
     color: var(--text-dim);
-    margin-top: 6px;
+    margin-top: 8px;
     text-align: center;
+    line-height: 1.3;
   }
 
   /* Discovered Smart TVs & Cast Devices */
