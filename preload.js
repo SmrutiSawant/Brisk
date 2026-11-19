@@ -94,6 +94,7 @@ contextBridge.exposeInMainWorld('browserAPI', {
   stopCast: () => ipcRenderer.invoke('stop-cast'),
   toggleCastPause: () => ipcRenderer.invoke('toggle-cast-pause'),
   discoverCastDevices: () => ipcRenderer.invoke('discover-cast-devices'),
+  addCastDeviceIp: (ip) => ipcRenderer.invoke('add-cast-device-ip', ip),
   castToDevice: (deviceId) => ipcRenderer.invoke('cast-to-device', deviceId),
   setCastActiveTab: (info) => ipcRenderer.send('set-cast-active-tab', info),
   onCastStatusChanged: (callback) => {

@@ -654,6 +654,7 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
   let assignedPort = 8554;
   let activeWsClients = new Set();
   let activeMjpegResponses = new Set();
+  let activeClientDetails = new Map(); // socket/res -> { ip, device, protocol, connectedAt }
   let captureInterval = null;
   let isCapturingFrame = false;
   let latestFrameBuffer = null;
@@ -665,8 +666,41 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
   let lastSecondMark = Date.now();
 
   let discoveredDevices = [];
+  let isSubnetScanning = false;
   let ssdpSocket = null;
   let mdnsSocket = null;
+
+  const devicesStoreFile = userDataPath ? path.join(userDataPath, 'cast-devices.json') : null;
+
+  function loadSavedDevices() {
+    try {
+      if (devicesStoreFile && fs.existsSync(devicesStoreFile)) {
+        const raw = JSON.parse(fs.readFileSync(devicesStoreFile, 'utf8'));
+        if (Array.isArray(raw)) discoveredDevices = raw;
+      }
+    } catch {}
+  }
+
+  function saveDevices() {
+    try {
+      if (devicesStoreFile) {
+        fs.writeFileSync(devicesStoreFile, JSON.stringify(discoveredDevices, null, 2), 'utf8');
+      }
+    } catch {}
+  }
+
+  loadSavedDevices();
+
+  function parseDeviceType(ua = '') {
+    if (/iphone/i.test(ua)) return 'iPhone';
+    if (/ipad/i.test(ua)) return 'iPad';
+    if (/android/i.test(ua)) return /mobile/i.test(ua) ? 'Android Phone' : 'Android Tablet / TV';
+    if (/smart-tv|googletv|tizen|webos|appletv|roku|crkey/i.test(ua)) return 'Smart TV';
+    if (/macintosh/i.test(ua)) return 'Mac';
+    if (/windows/i.test(ua)) return 'Windows PC';
+    if (/linux/i.test(ua)) return 'Linux PC';
+    return 'Web Receiver';
+  }
 
   // -------------------------------------------------------------------------
   // Frame Capture Loop
@@ -803,11 +837,20 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
             'Connection': 'close',
             'Pragma': 'no-cache',
           });
+          const clientIp = (req.socket.remoteAddress || '').replace(/^.*:/, '') || '127.0.0.1';
+          const ua = req.headers['user-agent'] || '';
           activeMjpegResponses.add(res);
+          activeClientDetails.set(res, {
+            ip: clientIp,
+            device: parseDeviceType(ua),
+            protocol: 'MJPEG',
+            connectedAt: Date.now(),
+          });
           notifyUiStatus();
 
           req.on('close', () => {
             activeMjpegResponses.delete(res);
+            activeClientDetails.delete(res);
             notifyUiStatus();
           });
         } else if (pathname === '/preview.jpg') {
@@ -853,7 +896,15 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
             '\r\n',
           );
 
+          const clientIp = (socket.remoteAddress || (req.socket && req.socket.remoteAddress) || '').replace(/^.*:/, '') || '127.0.0.1';
+          const ua = req.headers['user-agent'] || '';
           activeWsClients.add(socket);
+          activeClientDetails.set(socket, {
+            ip: clientIp,
+            device: parseDeviceType(ua),
+            protocol: 'WebSocket',
+            connectedAt: Date.now(),
+          });
           notifyUiStatus();
 
           // Immediately send metadata & latest frame if available
@@ -882,11 +933,13 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
 
           socket.on('close', () => {
             activeWsClients.delete(socket);
+            activeClientDetails.delete(socket);
             notifyUiStatus();
           });
 
           socket.on('error', () => {
             activeWsClients.delete(socket);
+            activeClientDetails.delete(socket);
             notifyUiStatus();
           });
         } else {
@@ -917,13 +970,210 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
   }
 
   // -------------------------------------------------------------------------
-  // Discovered Devices (DLNA / UPnP and Google Cast)
+  // Discovered Devices (Subnet HTTP Probing, SSDP, mDNS, DLNA, Cast)
   // -------------------------------------------------------------------------
 
-  function discoverDevices() {
-    discoveredDevices = [];
+  function fetchHttpJsonOrText(url, timeoutMs = 900) {
+    return new Promise((resolve, reject) => {
+      let timer = null;
+      let req = null;
+      let settled = false;
 
-    // 1. UPnP / DLNA SSDP Discovery via UDP Multicast (239.255.255.250:1900)
+      timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        if (req) {
+          try { req.destroy(); } catch {}
+        }
+        reject(new Error('ETIMEDOUT'));
+      }, timeoutMs);
+
+      try {
+        const u = new URL(url);
+        req = http.get(
+          {
+            hostname: u.hostname,
+            port: u.port,
+            path: u.pathname + u.search,
+            agent: false,
+            headers: {
+              'Accept': 'application/json, text/xml, */*',
+              'User-Agent': 'BriskBrowser/1.0',
+            },
+          },
+          (res) => {
+            let body = '';
+            res.setEncoding('utf8');
+            res.on('data', (chunk) => {
+              body += chunk;
+              if (body.length > 65536 && req) {
+                try { req.destroy(); } catch {}
+              }
+            });
+            res.on('end', () => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timer);
+              resolve({ statusCode: res.statusCode, headers: res.headers, body });
+            });
+          },
+        );
+
+        req.on('error', (err) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          reject(err);
+        });
+      } catch (err) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
+      }
+    });
+  }
+
+  async function probeDeviceIp(ip, timeoutMs = 1100, allowGeneric = false) {
+    if (!ip || typeof ip !== 'string') return null;
+    ip = ip.trim();
+    if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) return null;
+
+    // Run primary device checks concurrently in parallel
+    const [castProbe, rokuProbe, dlnaProbe] = await Promise.allSettled([
+      fetchHttpJsonOrText(`http://${ip}:8008/setup/eureka_info?params=name,device_info,version,build_info`, timeoutMs),
+      fetchHttpJsonOrText(`http://${ip}:8060/query/device-info`, timeoutMs),
+      fetchHttpJsonOrText(`http://${ip}:8008/ssdp/device-desc.xml`, timeoutMs),
+    ]);
+
+    // 1. Google Cast / Android TV check
+    if (castProbe.status === 'fulfilled' && castProbe.value.statusCode === 200 && castProbe.value.body) {
+      const body = castProbe.value.body;
+      let name = '';
+      let model = 'Google Cast / Android TV';
+      try {
+        const data = JSON.parse(body);
+        name = data.name || (data.device_info && data.device_info.model_name);
+        if (data.device_info && data.device_info.model_name) {
+          model = data.device_info.model_name;
+        }
+      } catch {
+        const fn = /"name"\s*:\s*"([^"]+)"/.exec(body);
+        if (fn) name = fn[1];
+      }
+      const dev = {
+        id: `cast_${ip}`,
+        name: name || `Cast Device (${ip})`,
+        model,
+        type: 'chromecast',
+        ip,
+        canDirectPlay: false,
+      };
+      addDevice(dev);
+      return dev;
+    }
+
+    // 2. Roku device check
+    if (rokuProbe.status === 'fulfilled' && rokuProbe.value.statusCode === 200 && rokuProbe.value.body) {
+      const body = rokuProbe.value.body;
+      const fnMatch = /<(?:user-device-name|friendly-device-name)>(.*?)<\//i.exec(body);
+      const mnMatch = /<model-name>(.*?)<\//i.exec(body);
+      const name = fnMatch ? fnMatch[1].trim() : `Roku TV (${ip})`;
+      const model = mnMatch ? mnMatch[1].trim() : 'Roku Player';
+      const dev = {
+        id: `roku_${ip}`,
+        name,
+        model,
+        type: 'roku',
+        ip,
+        canDirectPlay: false,
+      };
+      addDevice(dev);
+      return dev;
+    }
+
+    // 3. DIAL & DLNA check on port 8008
+    if (dlnaProbe.status === 'fulfilled' && dlnaProbe.value.statusCode === 200 && dlnaProbe.value.body && /<friendlyName>/i.test(dlnaProbe.value.body)) {
+      const xml = dlnaProbe.value.body;
+      const fnMatch = /<friendlyName>(.*?)<\/friendlyName>/i.exec(xml);
+      const mnMatch = /<modelName>(.*?)<\/modelName>/i.exec(xml);
+      const avMatch = /<serviceType>urn:schemas-upnp-org:service:AVTransport:1<\/serviceType>[\s\S]*?<controlURL>(.*?)<\/controlURL>/i.exec(xml);
+      let controlUrl = null;
+      if (avMatch) {
+        const rawCtrl = avMatch[1].trim();
+        controlUrl = rawCtrl.startsWith('http') ? rawCtrl : `http://${ip}:8008${rawCtrl.startsWith('/') ? '' : '/'}${rawCtrl}`;
+      }
+      const dev = {
+        id: `dlna_${ip}_8008`,
+        name: fnMatch ? fnMatch[1].trim() : `Smart TV (${ip})`,
+        model: mnMatch ? mnMatch[1].trim() : 'Smart TV',
+        type: controlUrl ? 'dlna' : 'smart-tv',
+        ip,
+        controlUrl,
+        canDirectPlay: Boolean(controlUrl),
+      };
+      addDevice(dev);
+      return dev;
+    }
+
+    // 4. Secondary ports for explicit manual additions or deep scans
+    if (allowGeneric) {
+      for (const port of [7676, 8001]) {
+        try {
+          const path = port === 7676 ? '/rootDesc.xml' : '/api/v2/';
+          const res = await fetchHttpJsonOrText(`http://${ip}:${port}${path}`, timeoutMs);
+          if (res.statusCode === 200 && res.body) {
+            if (path.includes('api/v2')) {
+              let name = '';
+              let model = 'Samsung Smart TV';
+              try {
+                const data = JSON.parse(res.body);
+                name = data.device?.name || data.name;
+                model = data.device?.modelName || model;
+              } catch {}
+              const dev = {
+                id: `samsung_${ip}`,
+                name: name || `Samsung TV (${ip})`,
+                model,
+                type: 'smart-tv',
+                ip,
+                canDirectPlay: false,
+              };
+              addDevice(dev);
+              return dev;
+            }
+          }
+        } catch {}
+      }
+
+      const dev = {
+        id: `manual_${ip}`,
+        name: `Device (${ip})`,
+        model: 'Manual Device',
+        type: 'network',
+        ip,
+        canDirectPlay: false,
+      };
+      addDevice(dev);
+      return dev;
+    }
+
+    return null;
+  }
+
+  async function scanSubnet(baseSubnet) {
+    const ips = [];
+    for (let i = 1; i <= 254; i++) {
+      ips.push(`${baseSubnet}.${i}`);
+    }
+    const batchSize = 40;
+    for (let i = 0; i < ips.length; i += batchSize) {
+      const batch = ips.slice(i, i + batchSize);
+      await Promise.allSettled(batch.map((ip) => probeDeviceIp(ip, 1500)));
+    }
+  }
+
+  function trySsdpMulticast() {
     try {
       if (ssdpSocket) {
         try { ssdpSocket.close(); } catch {}
@@ -948,28 +1198,30 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
           fetchDeviceDescription(location, usn, rinfo.address);
         }
       });
+      ssdpSocket.on('error', () => {});
 
       ssdpSocket.bind(0, () => {
-        const msearch = Buffer.from(
-          'M-SEARCH * HTTP/1.1\r\n' +
-          'HOST: 239.255.255.250:1900\r\n' +
-          'MAN: "ssdp:discover"\r\n' +
-          'MX: 2\r\n' +
-          'ST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n' +
-          '\r\n',
-        );
-        ssdpSocket.send(msearch, 0, msearch.length, 1900, '239.255.255.250');
+        try {
+          const msearch = Buffer.from(
+            'M-SEARCH * HTTP/1.1\r\n' +
+            'HOST: 239.255.255.250:1900\r\n' +
+            'MAN: "ssdp:discover"\r\n' +
+            'MX: 2\r\n' +
+            'ST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n' +
+            '\r\n',
+          );
+          ssdpSocket.send(msearch, 0, msearch.length, 1900, '239.255.255.250');
 
-        // Also search dial-multiscreen (Smart TVs & Chromecast DIAL)
-        const dialSearch = Buffer.from(
-          'M-SEARCH * HTTP/1.1\r\n' +
-          'HOST: 239.255.255.250:1900\r\n' +
-          'MAN: "ssdp:discover"\r\n' +
-          'MX: 2\r\n' +
-          'ST: urn:dial-multiscreen-org:service:dial:1\r\n' +
-          '\r\n',
-        );
-        ssdpSocket.send(dialSearch, 0, dialSearch.length, 1900, '239.255.255.250');
+          const dialSearch = Buffer.from(
+            'M-SEARCH * HTTP/1.1\r\n' +
+            'HOST: 239.255.255.250:1900\r\n' +
+            'MAN: "ssdp:discover"\r\n' +
+            'MX: 2\r\n' +
+            'ST: urn:dial-multiscreen-org:service:dial:1\r\n' +
+            '\r\n',
+          );
+          ssdpSocket.send(dialSearch, 0, dialSearch.length, 1900, '239.255.255.250');
+        } catch {}
       });
 
       setTimeout(() => {
@@ -981,8 +1233,9 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
     } catch (err) {
       console.warn('[cast] SSDP scan notice:', err.message);
     }
+  }
 
-    // 2. Google Cast mDNS Query (224.0.0.251:5353)
+  function tryMdnsMulticast() {
     try {
       if (mdnsSocket) {
         try { mdnsSocket.close(); } catch {}
@@ -991,7 +1244,6 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
 
       mdnsSocket.on('message', (msg, rinfo) => {
         const raw = msg.toString('binary');
-        // Look for Chromecast TXT record keys: fn= (friendly name), md= (model)
         const fnMatch = /fn=([^\x00-\x1f]+)/i.exec(raw);
         const mdMatch = /md=([^\x00-\x1f]+)/i.exec(raw);
         if (fnMatch) {
@@ -1007,25 +1259,27 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
           });
         }
       });
+      mdnsSocket.on('error', () => {});
 
       mdnsSocket.bind(0, () => {
-        // Simple DNS PTR question for _googlecast._tcp.local
-        const parts = '_googlecast._tcp.local'.split('.');
-        const qnameParts = [];
-        for (const p of parts) {
-          qnameParts.push(Buffer.from([p.length]));
-          qnameParts.push(Buffer.from(p, 'utf8'));
-        }
-        qnameParts.push(Buffer.from([0]));
+        try {
+          const parts = '_googlecast._tcp.local'.split('.');
+          const qnameParts = [];
+          for (const p of parts) {
+            qnameParts.push(Buffer.from([p.length]));
+            qnameParts.push(Buffer.from(p, 'utf8'));
+          }
+          qnameParts.push(Buffer.from([0]));
 
-        const header = Buffer.alloc(12);
-        header.writeUInt16BE(1, 4); // QDCOUNT = 1
-        const footer = Buffer.alloc(4);
-        footer.writeUInt16BE(12, 0); // QTYPE = PTR
-        footer.writeUInt16BE(1, 2);  // QCLASS = IN
+          const header = Buffer.alloc(12);
+          header.writeUInt16BE(1, 4);
+          const footer = Buffer.alloc(4);
+          footer.writeUInt16BE(12, 0);
+          footer.writeUInt16BE(1, 2);
 
-        const pkt = Buffer.concat([header, ...qnameParts, footer]);
-        mdnsSocket.send(pkt, 0, pkt.length, 5353, '224.0.0.251');
+          const pkt = Buffer.concat([header, ...qnameParts, footer]);
+          mdnsSocket.send(pkt, 0, pkt.length, 5353, '224.0.0.251');
+        } catch {}
       });
 
       setTimeout(() => {
@@ -1037,8 +1291,45 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
     } catch (err) {
       console.warn('[cast] mDNS scan notice:', err.message);
     }
+  }
 
-    return discoveredDevices;
+  async function discoverDevices() {
+    // 1. Parallel multicast SSDP & mDNS
+    trySsdpMulticast();
+    tryMdnsMulticast();
+
+    // 2. Fast Subnet Unicast Probing
+    const ifaces = getLocalIpAddresses();
+    const nonVirtual = ifaces.filter((iface) => !iface.isVirtual);
+    const subnets = new Set();
+    for (const iface of nonVirtual) {
+      const parts = iface.ip.split('.');
+      if (parts.length === 4) {
+        subnets.add(`${parts[0]}.${parts[1]}.${parts[2]}`);
+      }
+    }
+
+    const scanPromise = (async () => {
+      if (isSubnetScanning) return;
+      isSubnetScanning = true;
+      try {
+        for (const baseSubnet of subnets) {
+          await scanSubnet(baseSubnet);
+        }
+      } catch (err) {
+        console.warn('[cast] Subnet scan error:', err.message);
+      } finally {
+        isSubnetScanning = false;
+        notifyUiDevices();
+      }
+    })();
+
+    // Await scan if no devices are loaded yet so initial UI render gets them immediately
+    if (discoveredDevices.length === 0) {
+      await scanPromise;
+    }
+
+    return [...discoveredDevices];
   }
 
   function fetchDeviceDescription(locationUrl, usn, ip) {
@@ -1053,7 +1344,6 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
           const name = fnMatch ? fnMatch[1].trim() : `Smart TV (${ip})`;
           const model = mnMatch ? mnMatch[1].trim() : 'DLNA TV';
 
-          // Check for AVTransport service controlURL
           const avMatch = /<serviceType>urn:schemas-upnp-org:service:AVTransport:1<\/serviceType>[\s\S]*?<controlURL>(.*?)<\/controlURL>/i.exec(xml);
           let controlUrl = null;
           if (avMatch) {
@@ -1065,7 +1355,7 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
             id: usn || `dlna_${ip}`,
             name,
             model,
-            type: 'dlna',
+            type: controlUrl ? 'dlna' : 'smart-tv',
             ip,
             location: locationUrl,
             controlUrl,
@@ -1078,12 +1368,16 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
   }
 
   function addDevice(dev) {
-    const existing = discoveredDevices.findIndex((d) => d.id === dev.id || (d.ip === dev.ip && d.type === dev.type));
+    if (!dev || !dev.ip) return;
+    const existing = discoveredDevices.findIndex(
+      (d) => d.id === dev.id || (d.ip === dev.ip && d.type === dev.type) || (d.ip === dev.ip && d.name === dev.name)
+    );
     if (existing >= 0) {
-      discoveredDevices[existing] = { ...discoveredDevices[existing], ...dev };
+      discoveredDevices[existing] = { ...discoveredDevices[existing], ...dev, lastSeen: Date.now() };
     } else {
-      discoveredDevices.push(dev);
+      discoveredDevices.push({ ...dev, lastSeen: Date.now() });
     }
+    saveDevices();
     notifyUiDevices();
   }
 
@@ -1264,6 +1558,8 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
       totalFramesSent,
       hasPreview: Boolean(latestFrameBuffer),
       qrSvg: generateSvgQr(url),
+      clients: [...activeClientDetails.values()],
+      devices: [...discoveredDevices],
     };
   }
 
@@ -1287,6 +1583,7 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
     getSources,
     setActiveTab,
     discoverDevices,
+    probeDeviceIp,
     castToDlnaDevice,
     getPrimaryLocalIp,
   };

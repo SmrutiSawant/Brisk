@@ -2065,10 +2065,14 @@ let castStatus = {
   uptimeSec: 0,
   totalFramesSent: 0,
   qrSvg: '',
+  clients: [],
+  devices: [],
 };
 
 let castDevices = [];
 let isScanningDevices = false;
+let showManualIpInput = false;
+let castNoticeBanner = null; // { title, message }
 let selectedCastSource = 'tab'; // 'tab' | 'screen' | 'window'
 let selectedQualityPreset = '1080p'; // '1080p' | '60fps' | 'eco'
 
@@ -2113,13 +2117,31 @@ function openCastPanel() {
   if (castBtnEl) castBtnEl.classList.add('active');
   renderCastPanel();
 
-  if (castDevices.length === 0 && API.discoverCastDevices) {
-    API.discoverCastDevices().then((list) => {
-      if (Array.isArray(list)) {
-        castDevices = list;
+  if (API.getCastStatus) {
+    API.getCastStatus().then((status) => {
+      if (status) {
+        castStatus = status;
+        if (Array.isArray(status.devices) && status.devices.length > 0) {
+          castDevices = status.devices;
+        }
         if (castPanelEl && castPanelEl.classList.contains('open')) renderCastPanel();
       }
     }).catch(() => {});
+  }
+
+  if (API.discoverCastDevices) {
+    isScanningDevices = true;
+    renderCastPanel();
+    API.discoverCastDevices().then((list) => {
+      isScanningDevices = false;
+      if (Array.isArray(list) && list.length > 0) {
+        castDevices = list;
+      }
+      if (castPanelEl && castPanelEl.classList.contains('open')) renderCastPanel();
+    }).catch(() => {
+      isScanningDevices = false;
+      if (castPanelEl && castPanelEl.classList.contains('open')) renderCastPanel();
+    });
   }
 }
 
@@ -2185,6 +2207,32 @@ function renderCastPanel() {
 
   head.append(titleWrap, closeBtn);
   castPanelEl.appendChild(head);
+
+  // --- Notice Banner (if active) ---
+  if (castNoticeBanner) {
+    const banner = document.createElement('div');
+    banner.className = 'cp-cast-banner';
+
+    const bHead = document.createElement('div');
+    bHead.className = 'cp-cast-banner-title';
+    const bTitle = document.createElement('span');
+    bTitle.textContent = castNoticeBanner.title;
+    const bClose = document.createElement('button');
+    bClose.className = 'cp-cast-banner-close';
+    bClose.textContent = '×';
+    bClose.title = 'Dismiss';
+    bClose.addEventListener('click', () => {
+      castNoticeBanner = null;
+      renderCastPanel();
+    });
+    bHead.append(bTitle, bClose);
+
+    const bMsg = document.createElement('div');
+    bMsg.textContent = castNoticeBanner.message;
+
+    banner.append(bHead, bMsg);
+    castPanelEl.appendChild(banner);
+  }
 
   // --- Section 1: Source Selection ---
   const sourceSection = document.createElement('div');
@@ -2284,7 +2332,52 @@ function renderCastPanel() {
   sourceSection.appendChild(actionRow);
   castPanelEl.appendChild(sourceSection);
 
-  // --- Section 2: Direct Cast (URL & QR Code) ---
+  // --- Section 2: Active Viewers (Connected Clients) ---
+  if (castStatus.clients && castStatus.clients.length > 0) {
+    const viewersSection = document.createElement('div');
+    viewersSection.className = 'cp-section';
+
+    const vTitleRow = document.createElement('div');
+    vTitleRow.className = 'cp-section-title';
+    vTitleRow.innerHTML = `<span>Connected Viewers (${castStatus.clients.length})</span><span class="cp-viewer-pill"><span class="cp-viewer-dot"></span> Streaming</span>`;
+    viewersSection.appendChild(vTitleRow);
+
+    const vList = document.createElement('div');
+    vList.className = 'cp-viewers-list';
+
+    for (const client of castStatus.clients) {
+      const vItem = document.createElement('div');
+      vItem.className = 'cp-viewer-item';
+
+      const vInfo = document.createElement('div');
+      vInfo.className = 'cp-device-info';
+
+      const vIcon = document.createElement('div');
+      vIcon.className = 'cp-device-icon';
+      vIcon.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>';
+
+      const vTexts = document.createElement('div');
+      vTexts.className = 'cp-device-texts';
+
+      const vName = document.createElement('div');
+      vName.className = 'cp-device-name';
+      vName.textContent = client.device || 'Connected Client';
+
+      const vMeta = document.createElement('div');
+      vMeta.className = 'cp-device-meta';
+      vMeta.textContent = `${client.ip} • ${client.protocol || 'WebSocket'}`;
+
+      vTexts.append(vName, vMeta);
+      vInfo.append(vIcon, vTexts);
+      vItem.appendChild(vInfo);
+      vList.appendChild(vItem);
+    }
+
+    viewersSection.appendChild(vList);
+    castPanelEl.appendChild(viewersSection);
+  }
+
+  // --- Section 3: Direct Cast (URL & QR Code) ---
   const connectSection = document.createElement('div');
   connectSection.className = 'cp-section';
 
@@ -2345,33 +2438,90 @@ function renderCastPanel() {
   connectSection.appendChild(card);
   castPanelEl.appendChild(connectSection);
 
-  // --- Section 3: Smart TVs & Cast Devices ---
+  // --- Section 4: Smart TVs & Cast Devices ---
   const devSection = document.createElement('div');
   devSection.className = 'cp-section';
 
   const devTitleRow = document.createElement('div');
   devTitleRow.className = 'cp-section-title';
   const devTitleText = document.createElement('span');
-  devTitleText.textContent = 'Smart TVs & Cast Devices';
+  devTitleText.textContent = `Smart TVs & Cast Devices (${castDevices.length})`;
+
+  const devHeaderActions = document.createElement('div');
+  devHeaderActions.style.display = 'flex';
+  devHeaderActions.style.alignItems = 'center';
+  devHeaderActions.style.gap = '6px';
+
+  const addIpToggle = document.createElement('button');
+  addIpToggle.className = 'cp-scan-btn';
+  addIpToggle.textContent = showManualIpInput ? 'Cancel' : '+ Add IP';
+  addIpToggle.title = 'Manually add a TV or device by IP';
+  addIpToggle.addEventListener('click', () => {
+    showManualIpInput = !showManualIpInput;
+    renderCastPanel();
+  });
 
   const scanBtn = document.createElement('button');
   scanBtn.className = 'cp-scan-btn' + (isScanningDevices ? ' scanning' : '');
   scanBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 1 0 19.73 14h-2.08A6 6 0 1 1 12 6a5.9 5.9 0 0 1 4.22 1.78L13 11h7V4z"/></svg> <span>Scan</span>';
   scanBtn.addEventListener('click', async () => {
     isScanningDevices = true;
-    scanBtn.classList.add('scanning');
+    renderCastPanel();
     if (API.discoverCastDevices) {
       const list = await API.discoverCastDevices();
       if (Array.isArray(list)) castDevices = list;
     }
-    setTimeout(() => {
-      isScanningDevices = false;
-      renderCastPanel();
-    }, 2000);
+    isScanningDevices = false;
+    renderCastPanel();
   });
 
-  devTitleRow.append(devTitleText, scanBtn);
+  devHeaderActions.append(addIpToggle, scanBtn);
+  devTitleRow.append(devTitleText, devHeaderActions);
   devSection.appendChild(devTitleRow);
+
+  // Manual IP input field
+  if (showManualIpInput) {
+    const addIpBar = document.createElement('div');
+    addIpBar.className = 'cp-add-ip-bar';
+
+    const ipInput = document.createElement('input');
+    ipInput.className = 'cp-add-ip-input';
+    ipInput.placeholder = 'e.g. 192.168.0.100';
+    ipInput.type = 'text';
+
+    const ipSubmit = document.createElement('button');
+    ipSubmit.className = 'cp-add-ip-submit';
+    ipSubmit.textContent = 'Add Device';
+
+    const submitIp = async () => {
+      const rawIp = ipInput.value.trim();
+      if (!rawIp) return;
+      ipSubmit.textContent = 'Scanning…';
+      if (API.addCastDeviceIp) {
+        const added = await API.addCastDeviceIp(rawIp);
+        if (added) {
+          const idx = castDevices.findIndex((d) => d.id === added.id || d.ip === added.ip);
+          if (idx >= 0) castDevices[idx] = added;
+          else castDevices.push(added);
+        }
+      }
+      showManualIpInput = false;
+      renderCastPanel();
+    };
+
+    ipSubmit.addEventListener('click', submitIp);
+    ipInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submitIp();
+      else if (e.key === 'Escape') {
+        showManualIpInput = false;
+        renderCastPanel();
+      }
+    });
+
+    addIpBar.append(ipInput, ipSubmit);
+    devSection.appendChild(addIpBar);
+    setTimeout(() => ipInput.focus(), 50);
+  }
 
   const devList = document.createElement('div');
   devList.className = 'cp-devices-list';
@@ -2386,9 +2536,13 @@ function renderCastPanel() {
 
       const icon = document.createElement('div');
       icon.className = 'cp-device-icon';
-      icon.innerHTML = dev.type === 'chromecast'
-        ? '<svg viewBox="0 0 24 24"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.92-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>'
-        : '<svg viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>';
+      if (dev.type === 'chromecast') {
+        icon.innerHTML = '<svg viewBox="0 0 24 24"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.92-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>';
+      } else if (dev.type === 'roku') {
+        icon.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h16v12zm-6-6-6-4v8z"/></svg>';
+      } else {
+        icon.innerHTML = '<svg viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>';
+      }
 
       const texts = document.createElement('div');
       texts.className = 'cp-device-texts';
@@ -2397,7 +2551,9 @@ function renderCastPanel() {
       name.textContent = dev.name || 'Smart TV';
       const meta = document.createElement('div');
       meta.className = 'cp-device-meta';
-      meta.textContent = `${dev.type.toUpperCase()} • ${dev.ip}`;
+      const typeLabel = (dev.type || 'tv').toUpperCase();
+      const modelLabel = dev.model && dev.model !== dev.name ? ` • ${dev.model}` : '';
+      meta.textContent = `${typeLabel}${modelLabel} • ${dev.ip}`;
       texts.append(name, meta);
 
       info.append(icon, texts);
@@ -2418,12 +2574,24 @@ function renderCastPanel() {
           }
         });
       } else {
-        actBtn.textContent = 'Connect';
-        actBtn.addEventListener('click', () => {
-          navigator.clipboard.writeText(castStatus.url || '').then(() => {
-            actBtn.textContent = 'URL Copied!';
-            setTimeout(() => { actBtn.textContent = 'Connect'; }, 2000);
-          });
+        actBtn.textContent = 'Cast';
+        actBtn.title = `Start casting and get connection URL for ${dev.name}`;
+        actBtn.addEventListener('click', async () => {
+          actBtn.textContent = 'Starting…';
+          if (!castStatus.isStreaming) {
+            await applyCastConfig();
+          }
+          const streamUrl = castStatus.url || `http://${dev.ip}:8554`;
+          try {
+            await navigator.clipboard.writeText(streamUrl);
+          } catch {}
+
+          actBtn.textContent = 'Ready!';
+          castNoticeBanner = {
+            title: `Ready for ${dev.name}`,
+            message: `Stream is live at ${streamUrl}. Open this URL on ${dev.name}'s browser or receiver (URL copied to clipboard).`,
+          };
+          renderCastPanel();
         });
       }
 
@@ -2433,7 +2601,7 @@ function renderCastPanel() {
   } else {
     const empty = document.createElement('div');
     empty.className = 'cp-empty-state';
-    empty.textContent = 'No DLNA / Cast TVs detected yet. Open the link or scan the QR code above on any device on your Wi-Fi.';
+    empty.textContent = 'No Smart TVs detected yet. Click Scan to search your Wi-Fi, or click "+ Add IP" to add manually.';
     devList.appendChild(empty);
   }
   devSection.appendChild(devList);

@@ -414,9 +414,14 @@ ipcMain.handle('toggle-cast-pause', (event) => {
   return castManager.togglePause();
 });
 
-ipcMain.handle('discover-cast-devices', (event) => {
+ipcMain.handle('discover-cast-devices', async (event) => {
   if (!fromUI(event) || !castManager) return [];
-  return castManager.discoverDevices();
+  return await castManager.discoverDevices();
+});
+
+ipcMain.handle('add-cast-device-ip', async (event, ip) => {
+  if (!fromUI(event) || !castManager || typeof ip !== 'string') return null;
+  return await castManager.probeDeviceIp(ip.trim(), 2500, true);
 });
 
 ipcMain.handle('cast-to-device', async (event, deviceId) => {

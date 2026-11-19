@@ -1664,6 +1664,109 @@
     color: var(--text-dim);
     margin-top: 2px;
   }
+
+  /* Connected Viewers section */
+  .cp-viewers-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+  }
+  .cp-viewer-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px;
+    background: rgba(16, 185, 129, .08);
+    border: 1px solid rgba(16, 185, 129, .25);
+    border-radius: 6px;
+    gap: 8px;
+  }
+  .cp-viewer-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #059669;
+    padding: 2px 6px;
+    border-radius: 10px;
+    background: rgba(16, 185, 129, .15);
+  }
+  .cp-viewer-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #10b981;
+    animation: pulse 1.4s infinite;
+  }
+
+  /* Manual IP input bar */
+  .cp-add-ip-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 6px;
+    background: rgba(0,0,0,.03);
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+  }
+  .cp-add-ip-input {
+    flex: 1;
+    height: 24px;
+    padding: 0 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--tab-active);
+    color: var(--text);
+    font: inherit;
+    font-size: 11px;
+    outline: 0;
+  }
+  .cp-add-ip-input:focus { border-color: var(--text); }
+  .cp-add-ip-submit {
+    height: 24px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--text);
+    color: var(--tab-active);
+    font: inherit;
+    font-size: 10.5px;
+    cursor: default;
+    white-space: nowrap;
+  }
+  .cp-add-ip-submit:hover { opacity: .9; }
+
+  /* In-panel notification / banner */
+  .cp-cast-banner {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: rgba(59, 130, 246, .08);
+    border: 1px solid rgba(59, 130, 246, .3);
+    color: var(--text);
+    font-size: 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .cp-cast-banner-title {
+    font-weight: 600;
+    color: #1d4ed8;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .cp-cast-banner-close {
+    background: transparent;
+    border: 0;
+    color: var(--text-dim);
+    cursor: default;
+    font-size: 12px;
+    padding: 0 4px;
+  }
+  .cp-cast-banner-close:hover { color: var(--text); }
 </style>
 </head>
 <body>
