@@ -1639,7 +1639,8 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
     const host = dev.ip;
     const port = 8009;
     const primaryIp = getPrimaryLocalIp();
-    const streamUrl = `http://${primaryIp}:${assignedPort}/stream.mjpg`;
+    const receiverPageUrl = `http://${primaryIp}:${assignedPort}`;
+    const previewUrl = `http://${primaryIp}:${assignedPort}/preview.jpg`;
 
     // Ensure first frame is ready before initiating stream so TV sees screen immediately
     if (!latestFrameBuffer) {
@@ -1651,7 +1652,10 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
       let rxBuf = Buffer.alloc(0);
       let transportId = null;
       let sessionId = null;
-      let reqId = 2;
+      let reqId = 1;
+      let launchedApp = false;
+      let triedFallback = false;
+      let updateInterval = null;
 
       const finish = (result) => {
         if (resolved) return;
@@ -1661,13 +1665,14 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
 
       const timer = setTimeout(() => {
         finish({ success: false, error: 'Cast device connection timed out' });
-      }, 9000);
+      }, 12000);
 
       try {
         const socket = tls.connect(port, host, { rejectUnauthorized: false }, () => {
           socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.tp.connection', JSON.stringify({ type: 'CONNECT' })));
           socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.tp.heartbeat', JSON.stringify({ type: 'PING' })));
-          socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.receiver', JSON.stringify({ type: 'LAUNCH', appId: 'CC1AD845', requestId: 1 })));
+          // Query status first so we can cleanly stop any running stale session before launch
+          socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.receiver', JSON.stringify({ type: 'GET_STATUS', requestId: reqId++ })));
         });
 
         const pingInterval = setInterval(() => {
@@ -1679,6 +1684,27 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
           }
         }, 2500);
 
+        function launchDashCast() {
+          if (socket && !socket.destroyed) {
+            socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.receiver', JSON.stringify({
+              type: 'LAUNCH',
+              appId: '84912283',
+              requestId: reqId++,
+            })));
+          }
+        }
+
+        function launchDefaultMediaReceiver() {
+          triedFallback = true;
+          if (socket && !socket.destroyed) {
+            socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.receiver', JSON.stringify({
+              type: 'LAUNCH',
+              appId: 'CC1AD845',
+              requestId: reqId++,
+            })));
+          }
+        }
+
         socket.on('data', (chunk) => {
           rxBuf = Buffer.concat([rxBuf, chunk]);
           const { msgs, remaining } = decodeCastMessages(rxBuf);
@@ -1687,43 +1713,114 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
           for (const m of msgs) {
             try {
               const parsed = JSON.parse(m.payload);
-              if (parsed.type === 'RECEIVER_STATUS' && parsed.status?.applications) {
-                const app = parsed.status.applications.find((a) => a.appId === 'CC1AD845');
-                if (app && !transportId) {
-                  transportId = app.transportId;
-                  sessionId = app.sessionId;
-                  socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.tp.connection', JSON.stringify({ type: 'CONNECT' })));
 
-                  const loadPayload = {
-                    type: 'LOAD',
-                    requestId: reqId++,
-                    autoplay: true,
-                    media: {
-                      contentId: streamUrl,
-                      contentType: 'image/jpeg',
-                      streamType: 'LIVE',
-                      metadata: {
-                        type: 0,
-                        metadataType: 0,
-                        title: 'Brisk Cast — Live Screen',
-                      },
-                    },
-                  };
+              // Handle initial status check & clean app launch
+              if (parsed.type === 'RECEIVER_STATUS') {
+                const apps = parsed.status?.applications || [];
 
-                  socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.media', JSON.stringify(loadPayload)));
+                if (!launchedApp) {
+                  launchedApp = true;
+                  // If another app is running, stop it first to ensure clean state
+                  if (apps.length > 0 && apps[0].appId !== '84912283') {
+                    socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.receiver', JSON.stringify({
+                      type: 'STOP',
+                      sessionId: apps[0].sessionId,
+                      requestId: reqId++,
+                    })));
+                    setTimeout(launchDashCast, 350);
+                  } else {
+                    launchDashCast();
+                  }
+                } else {
+                  // Check for DashCast receiver (primary: full 30-60fps WebSocket & HTML5 canvas)
+                  const dashApp = apps.find((a) => a.appId === '84912283');
+                  if (dashApp && !transportId) {
+                    transportId = dashApp.transportId;
+                    sessionId = dashApp.sessionId;
 
-                  activeCastClient = {
-                    socket,
-                    pingInterval,
-                    transportId,
-                    sessionId,
-                    ip: host,
-                    deviceName: dev.name,
-                  };
+                    socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.tp.connection', JSON.stringify({ type: 'CONNECT' })));
 
-                  clearTimeout(timer);
-                  finish({ success: true, deviceName: dev.name, deviceId: dev.id });
+                    setTimeout(() => {
+                      const dashPayload = JSON.stringify({
+                        url: receiverPageUrl,
+                        force: true,
+                        reload: false,
+                      });
+                      socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.madmod.dashcast', dashPayload));
+                      socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:es.offd.dashcast', dashPayload));
+
+                      activeCastClient = {
+                        socket,
+                        pingInterval,
+                        transportId,
+                        sessionId,
+                        ip: host,
+                        deviceName: dev.name,
+                      };
+
+                      clearTimeout(timer);
+                      finish({ success: true, deviceName: dev.name, deviceId: dev.id });
+                    }, 400);
+                    return;
+                  }
+
+                  // Check for Default Media Receiver fallback (discrete preview JPEG)
+                  const mediaApp = apps.find((a) => a.appId === 'CC1AD845');
+                  if (mediaApp && !transportId) {
+                    transportId = mediaApp.transportId;
+                    sessionId = mediaApp.sessionId;
+
+                    socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.tp.connection', JSON.stringify({ type: 'CONNECT' })));
+
+                    const sendPreviewLoad = () => {
+                      if (!socket || socket.destroyed || !transportId) return;
+                      const loadPayload = {
+                        type: 'LOAD',
+                        requestId: reqId++,
+                        autoplay: true,
+                        media: {
+                          contentId: `${previewUrl}?t=${Date.now()}`,
+                          contentType: 'image/jpeg',
+                          streamType: 'BUFFERED',
+                          metadata: {
+                            type: 0,
+                            metadataType: 0,
+                            title: 'Brisk Cast — Live Screen',
+                          },
+                        },
+                      };
+                      socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.media', JSON.stringify(loadPayload)));
+                    };
+
+                    setTimeout(sendPreviewLoad, 400);
+
+                    // Periodically refresh preview frame if DashCast wasn't available
+                    updateInterval = setInterval(() => {
+                      if (isStreaming && !isPaused && socket && !socket.destroyed && transportId) {
+                        sendPreviewLoad();
+                      }
+                    }, 2000);
+
+                    activeCastClient = {
+                      socket,
+                      pingInterval,
+                      updateInterval,
+                      transportId,
+                      sessionId,
+                      ip: host,
+                      deviceName: dev.name,
+                    };
+
+                    clearTimeout(timer);
+                    finish({ success: true, deviceName: dev.name, deviceId: dev.id });
+                    return;
+                  }
                 }
+              }
+
+              // Fallback to CC1AD845 if DashCast launch error received
+              if (parsed.type === 'LAUNCH_ERROR' && !triedFallback) {
+                launchDefaultMediaReceiver();
               }
             } catch {}
           }
