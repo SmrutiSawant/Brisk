@@ -30,6 +30,7 @@ lerna-debug.log*
 
 # Runtime / user data the browser will write once you add persistence
 userData/
+cast-devices.json
 *.sqlite
 *.sqlite-journal
 

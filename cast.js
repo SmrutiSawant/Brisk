@@ -13,6 +13,12 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 
+// Minimal valid 1x1 JFIF JPEG buffer for reliable stream startup & preview fallback
+const FALLBACK_JPEG = Buffer.from(
+  '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=',
+  'base64',
+);
+
 // ---------------------------------------------------------------------------
 // QR Code Generator (Pure JavaScript, Version 1-5, EC Level M)
 // Generates self-contained SVG strings offline with zero dependencies.
@@ -717,31 +723,57 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
       if (currentSource === 'tab') {
         const wc = getActiveTabWebContents ? getActiveTabWebContents() : null;
         if (wc && !wc.isDestroyed()) {
-          nativeImg = await wc.capturePage();
+          try { nativeImg = await wc.capturePage(); } catch {}
         }
       } else if (currentSource === 'screen') {
-        const displays = screen.getAllDisplays();
-        const primary = screen.getPrimaryDisplay();
-        const sources = await desktopCapturer.getSources({
-          types: ['screen'],
-          thumbnailSize: {
-            width: primary.bounds.width || 1920,
-            height: primary.bounds.height || 1080,
-          },
-        });
-        if (sources.length > 0) {
-          nativeImg = sources[0].thumbnail;
-        }
+        try {
+          const primary = screen.getPrimaryDisplay();
+          const sources = await desktopCapturer.getSources({
+            types: ['screen'],
+            thumbnailSize: {
+              width: primary.bounds.width || 1920,
+              height: primary.bounds.height || 1080,
+            },
+          });
+          if (sources.length > 0 && sources[0].thumbnail && !sources[0].thumbnail.isEmpty()) {
+            nativeImg = sources[0].thumbnail;
+          }
+        } catch {}
       } else if (currentSource === 'window') {
         const win = getMainWindow ? getMainWindow() : null;
         if (win && !win.isDestroyed()) {
-          nativeImg = await win.webContents.capturePage();
+          try { nativeImg = await win.webContents.capturePage(); } catch {}
         } else {
           const wins = webContents.getAllWebContents();
           const mainWc = wins.find((w) => !w.isDestroyed() && w.getType() === 'window');
           if (mainWc) {
-            nativeImg = await mainWc.capturePage();
+            try { nativeImg = await mainWc.capturePage(); } catch {}
           }
+        }
+      }
+
+      // Robust fallback chain: if primary source produces no or empty image (e.g. desktopCapturer
+      // permissions or thread desktop limitation on Windows), fall back to capturing the browser window
+      // or active tab so casting NEVER blacks out.
+      if (!nativeImg || nativeImg.isEmpty()) {
+        const win = getMainWindow ? getMainWindow() : null;
+        if (win && !win.isDestroyed()) {
+          try { nativeImg = await win.webContents.capturePage(); } catch {}
+        }
+      }
+
+      if (!nativeImg || nativeImg.isEmpty()) {
+        const wc = getActiveTabWebContents ? getActiveTabWebContents() : null;
+        if (wc && !wc.isDestroyed()) {
+          try { nativeImg = await wc.capturePage(); } catch {}
+        }
+      }
+
+      if (!nativeImg || nativeImg.isEmpty()) {
+        const wins = webContents.getAllWebContents();
+        const anyWc = wins.find((w) => !w.isDestroyed() && (w.getType() === 'window' || w.getType() === 'webview'));
+        if (anyWc) {
+          try { nativeImg = await anyWc.capturePage(); } catch {}
         }
       }
 
@@ -801,6 +833,8 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
 
   function startCaptureLoop() {
     stopCaptureLoop();
+    // Fire initial frame immediately so buffer is warm
+    captureSingleFrame().catch(() => {});
     const intervalMs = Math.max(16, Math.floor(1000 / targetFps));
     captureInterval = setInterval(captureSingleFrame, intervalMs);
   }
@@ -835,8 +869,9 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
           res.writeHead(200, {
             'Content-Type': 'multipart/x-mixed-replace; boundary=--frame',
             'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Connection': 'close',
+            'Connection': 'keep-alive',
             'Pragma': 'no-cache',
+            'Access-Control-Allow-Origin': '*',
           });
           const clientIp = (req.socket.remoteAddress || '').replace(/^.*:/, '') || '127.0.0.1';
           const ua = req.headers['user-agent'] || '';
@@ -849,18 +884,52 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
           });
           notifyUiStatus();
 
+          // Immediately push current frame to new receiver so there's zero initial blackout
+          if (latestFrameBuffer) {
+            try {
+              res.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${latestFrameBuffer.length}\r\n\r\n`);
+              res.write(latestFrameBuffer);
+              res.write('\r\n');
+            } catch {}
+          }
+
           req.on('close', () => {
             activeMjpegResponses.delete(res);
             activeClientDetails.delete(res);
             notifyUiStatus();
           });
         } else if (pathname === '/preview.jpg') {
+          const sendPreview = () => {
+            const buf = latestFrameBuffer || FALLBACK_JPEG;
+            try {
+              res.writeHead(200, {
+                'Content-Type': 'image/jpeg',
+                'Content-Length': buf.length,
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Access-Control-Allow-Origin': '*',
+              });
+              res.end(buf);
+            } catch {}
+          };
+
           if (latestFrameBuffer) {
-            res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': latestFrameBuffer.length });
-            res.end(latestFrameBuffer);
+            sendPreview();
           } else {
-            res.writeHead(204);
-            res.end();
+            let responded = false;
+            const t = setTimeout(() => {
+              if (!responded) {
+                responded = true;
+                sendPreview();
+              }
+            }, 500);
+            const checkInt = setInterval(() => {
+              if (latestFrameBuffer && !responded) {
+                responded = true;
+                clearTimeout(t);
+                clearInterval(checkInt);
+                sendPreview();
+              }
+            }, 30);
           }
         } else if (pathname === '/qr.svg') {
           const url = `http://${getPrimaryLocalIp()}:${assignedPort}`;
@@ -1472,6 +1541,18 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
         if (activeCastClient.pingInterval) clearInterval(activeCastClient.pingInterval);
         if (activeCastClient.updateInterval) clearInterval(activeCastClient.updateInterval);
         if (activeCastClient.socket && !activeCastClient.socket.destroyed) {
+          if (activeCastClient.sessionId) {
+            try {
+              activeCastClient.socket.write(
+                buildCastMessage(
+                  'sender-0',
+                  'receiver-0',
+                  'urn:x-cast:com.google.cast.receiver',
+                  JSON.stringify({ type: 'STOP', sessionId: activeCastClient.sessionId, requestId: 999 }),
+                ),
+              );
+            } catch {}
+          }
           activeCastClient.socket.end();
         }
       } catch {}
@@ -1558,12 +1639,18 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
     const host = dev.ip;
     const port = 8009;
     const primaryIp = getPrimaryLocalIp();
-    const streamUrl = `http://${primaryIp}:${assignedPort}/preview.jpg`;
+    const streamUrl = `http://${primaryIp}:${assignedPort}/stream.mjpg`;
+
+    // Ensure first frame is ready before initiating stream so TV sees screen immediately
+    if (!latestFrameBuffer) {
+      await captureSingleFrame().catch(() => {});
+    }
 
     return new Promise((resolve) => {
       let resolved = false;
       let rxBuf = Buffer.alloc(0);
       let transportId = null;
+      let sessionId = null;
       let reqId = 2;
 
       const finish = (result) => {
@@ -1592,8 +1679,6 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
           }
         }, 2500);
 
-        let updateInterval = null;
-
         socket.on('data', (chunk) => {
           rxBuf = Buffer.concat([rxBuf, chunk]);
           const { msgs, remaining } = decodeCastMessages(rxBuf);
@@ -1606,6 +1691,7 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
                 const app = parsed.status.applications.find((a) => a.appId === 'CC1AD845');
                 if (app && !transportId) {
                   transportId = app.transportId;
+                  sessionId = app.sessionId;
                   socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.tp.connection', JSON.stringify({ type: 'CONNECT' })));
 
                   const loadPayload = {
@@ -1613,9 +1699,9 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
                     requestId: reqId++,
                     autoplay: true,
                     media: {
-                      contentId: `${streamUrl}?t=${Date.now()}`,
+                      contentId: streamUrl,
                       contentType: 'image/jpeg',
-                      streamType: 'BUFFERED',
+                      streamType: 'LIVE',
                       metadata: {
                         type: 0,
                         metadataType: 0,
@@ -1626,32 +1712,11 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
 
                   socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.media', JSON.stringify(loadPayload)));
 
-                  updateInterval = setInterval(() => {
-                    if (isStreaming && !isPaused && socket && !socket.destroyed && transportId) {
-                      const refreshLoad = {
-                        type: 'LOAD',
-                        requestId: reqId++,
-                        autoplay: true,
-                        media: {
-                          contentId: `${streamUrl}?t=${Date.now()}`,
-                          contentType: 'image/jpeg',
-                          streamType: 'BUFFERED',
-                          metadata: {
-                            type: 0,
-                            metadataType: 0,
-                            title: 'Brisk Cast — Live Screen',
-                          },
-                        },
-                      };
-                      socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.media', JSON.stringify(refreshLoad)));
-                    }
-                  }, 1200);
-
                   activeCastClient = {
                     socket,
                     pingInterval,
-                    updateInterval,
                     transportId,
+                    sessionId,
                     ip: host,
                     deviceName: dev.name,
                   };
@@ -1719,6 +1784,10 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
     isStreaming = true;
     streamStartTime = Date.now();
     startCaptureLoop();
+    // Await first frame capture so initial requests immediately have a valid image buffer
+    if (!latestFrameBuffer) {
+      await captureSingleFrame().catch(() => {});
+    }
     notifyUiStatus();
 
     // Trigger device discovery scan in the background
