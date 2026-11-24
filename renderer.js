@@ -2073,7 +2073,7 @@ let castDevices = [];
 let isScanningDevices = false;
 let showManualIpInput = false;
 let castNoticeBanner = null; // { title, message }
-let selectedCastSource = 'screen'; // 'screen' | 'tab' | 'window'
+let selectedCastSource = 'tab'; // 'tab' | 'screen' | 'window'
 let selectedQualityPreset = '1080p'; // '1080p' | '60fps' | 'eco'
 
 function syncCastButton() {
@@ -2150,7 +2150,7 @@ async function toggleCastPanel() {
     closeCastPanel();
   } else {
     if (!castStatus.isStreaming) {
-      selectedCastSource = 'screen';
+      selectedCastSource = selectedCastSource || 'tab';
       await applyCastConfig();
     }
     openCastPanel();
@@ -2302,10 +2302,10 @@ function renderCastPanel() {
   if (!castStatus.isStreaming) {
     const startBtn = document.createElement('button');
     startBtn.className = 'cp-start-btn';
-    startBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Cast Screen';
+    startBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Cast Tab';
     startBtn.addEventListener('click', async () => {
       startBtn.textContent = 'Starting…';
-      selectedCastSource = 'screen';
+      selectedCastSource = selectedCastSource || 'tab';
       await applyCastConfig();
     });
     actionRow.appendChild(startBtn);
@@ -2576,7 +2576,7 @@ function renderCastPanel() {
         actBtn.addEventListener('click', async () => {
           actBtn.textContent = 'Connecting…';
           if (!castStatus.isStreaming) {
-            selectedCastSource = 'screen';
+            selectedCastSource = selectedCastSource || 'tab';
             await applyCastConfig();
           }
           if (API.castToDevice) {
@@ -2604,7 +2604,7 @@ function renderCastPanel() {
         actBtn.addEventListener('click', async () => {
           actBtn.textContent = 'Starting…';
           if (!castStatus.isStreaming) {
-            selectedCastSource = 'screen';
+            selectedCastSource = selectedCastSource || 'tab';
             await applyCastConfig();
           }
           const streamUrl = castStatus.url || `http://${dev.ip}:8554`;
@@ -2669,8 +2669,8 @@ if (castBtnEl) {
 
     const wasOpen = castPanelEl.classList.contains('open');
     if (!wasOpen && !castStatus.isStreaming) {
-      // Directly start casting the screen on click!
-      selectedCastSource = 'screen';
+      // Directly start casting the active tab on click!
+      selectedCastSource = selectedCastSource || 'tab';
       await applyCastConfig();
     }
 

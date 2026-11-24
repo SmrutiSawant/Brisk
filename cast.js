@@ -752,16 +752,8 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
         }
       }
 
-      // Robust fallback chain: if primary source produces no or empty image (e.g. desktopCapturer
-      // permissions or thread desktop limitation on Windows), fall back to capturing the browser window
-      // or active tab so casting NEVER blacks out.
-      if (!nativeImg || nativeImg.isEmpty()) {
-        const win = getMainWindow ? getMainWindow() : null;
-        if (win && !win.isDestroyed()) {
-          try { nativeImg = await win.webContents.capturePage(); } catch {}
-        }
-      }
-
+      // Robust fallback chain: Prioritize capturing the active web page tab first
+      // so the browser web contents are ALWAYS visible on the cast target!
       if (!nativeImg || nativeImg.isEmpty()) {
         const wc = getActiveTabWebContents ? getActiveTabWebContents() : null;
         if (wc && !wc.isDestroyed()) {
@@ -771,9 +763,16 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
 
       if (!nativeImg || nativeImg.isEmpty()) {
         const wins = webContents.getAllWebContents();
-        const anyWc = wins.find((w) => !w.isDestroyed() && (w.getType() === 'window' || w.getType() === 'webview'));
+        const anyWc = wins.find((w) => !w.isDestroyed() && w.getType() === 'webview');
         if (anyWc) {
           try { nativeImg = await anyWc.capturePage(); } catch {}
+        }
+      }
+
+      if (!nativeImg || nativeImg.isEmpty()) {
+        const win = getMainWindow ? getMainWindow() : null;
+        if (win && !win.isDestroyed()) {
+          try { nativeImg = await win.webContents.capturePage(); } catch {}
         }
       }
 
@@ -915,21 +914,7 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
           if (latestFrameBuffer) {
             sendPreview();
           } else {
-            let responded = false;
-            const t = setTimeout(() => {
-              if (!responded) {
-                responded = true;
-                sendPreview();
-              }
-            }, 500);
-            const checkInt = setInterval(() => {
-              if (latestFrameBuffer && !responded) {
-                responded = true;
-                clearTimeout(t);
-                clearInterval(checkInt);
-                sendPreview();
-              }
-            }, 30);
+            captureSingleFrame().then(sendPreview).catch(sendPreview);
           }
         } else if (pathname === '/qr.svg') {
           const url = `http://${getPrimaryLocalIp()}:${assignedPort}`;
@@ -1655,6 +1640,8 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
       let launchedApp = false;
       let loadSent = false;
       let updateInterval = null;
+      let isMediaLoading = false;
+      let lastLoadCompletedTime = 0;
 
       const finish = (result) => {
         if (resolved) return;
@@ -1694,7 +1681,8 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
         }
 
         function sendPreviewLoad() {
-          if (!socket || socket.destroyed || !transportId) return;
+          if (!socket || socket.destroyed || !transportId || isMediaLoading) return;
+          isMediaLoading = true;
           const loadPayload = {
             type: 'LOAD',
             requestId: reqId++,
@@ -1722,6 +1710,24 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
             try {
               const parsed = JSON.parse(m.payload);
 
+              // Track media player status so we only send next frame once previous frame has fully loaded
+              if (parsed.type === 'MEDIA_STATUS') {
+                const statusList = parsed.status || [];
+                const first = statusList[0];
+                if (first) {
+                  if (first.playerState === 'PAUSED') {
+                    isMediaLoading = false;
+                    lastLoadCompletedTime = Date.now();
+                  } else if (first.playerState === 'IDLE' && first.idleReason) {
+                    isMediaLoading = false;
+                  }
+                }
+              }
+
+              if (parsed.type === 'LOAD_CANCELLED' || parsed.type === 'LOAD_FAILED') {
+                isMediaLoading = false;
+              }
+
               if (parsed.type === 'RECEIVER_STATUS') {
                 const apps = parsed.status?.applications || [];
                 const mediaApp = apps.find((a) => a.appId === 'CC1AD845');
@@ -1735,12 +1741,14 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
                     socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.tp.connection', JSON.stringify({ type: 'CONNECT' })));
                     setTimeout(sendPreviewLoad, 300);
 
-                    // Periodically refresh preview frame so TV tracks live browser screen
+                    // Periodically refresh preview frame once the previous frame is displayed
                     updateInterval = setInterval(() => {
                       if (isStreaming && !isPaused && socket && !socket.destroyed && transportId) {
-                        sendPreviewLoad();
+                        if (!isMediaLoading && (Date.now() - lastLoadCompletedTime >= 2500)) {
+                          sendPreviewLoad();
+                        }
                       }
-                    }, 2000);
+                    }, 1000);
 
                     activeCastClient = {
                       socket,
