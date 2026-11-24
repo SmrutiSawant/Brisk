@@ -1624,6 +1624,7 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
     const host = dev.ip;
     const port = 8009;
     const primaryIp = getPrimaryLocalIp();
+    const receiverPageUrl = `http://${primaryIp}:${assignedPort}`;
     const previewUrl = `http://${primaryIp}:${assignedPort}/preview.jpg`;
 
     // Ensure first frame is ready before initiating stream so TV sees screen immediately
@@ -1638,26 +1639,26 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
       let sessionId = null;
       let reqId = 1;
       let launchedApp = false;
-      let loadSent = false;
-      let updateInterval = null;
-      let isMediaLoading = false;
-      let lastLoadCompletedTime = 0;
+      let sentUrl = false;
+      let triedFallback = false;
+      let readyTimeout = null;
 
       const finish = (result) => {
         if (resolved) return;
         resolved = true;
+        if (readyTimeout) clearTimeout(readyTimeout);
         resolve(result);
       };
 
       const timer = setTimeout(() => {
         finish({ success: false, error: 'Cast device connection timed out' });
-      }, 12000);
+      }, 15000);
 
       try {
         const socket = tls.connect(port, host, { rejectUnauthorized: false }, () => {
           socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.tp.connection', JSON.stringify({ type: 'CONNECT' })));
           socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.tp.heartbeat', JSON.stringify({ type: 'PING' })));
-          // Query receiver status first to check if CC1AD845 is already running or if stale app needs stopping
+          // Query receiver status first to cleanly stop any running stale session before launch
           socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.receiver', JSON.stringify({ type: 'GET_STATUS', requestId: reqId++ })));
         });
 
@@ -1668,9 +1669,20 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
               socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.tp.heartbeat', JSON.stringify({ type: 'PING' })));
             }
           }
-        }, 2500);
+        }, 2000);
+
+        function launchDashCast() {
+          if (socket && !socket.destroyed) {
+            socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.receiver', JSON.stringify({
+              type: 'LAUNCH',
+              appId: '84912283',
+              requestId: reqId++,
+            })));
+          }
+        }
 
         function launchDefaultMediaReceiver() {
+          triedFallback = true;
           if (socket && !socket.destroyed) {
             socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.receiver', JSON.stringify({
               type: 'LAUNCH',
@@ -1680,25 +1692,31 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
           }
         }
 
-        function sendPreviewLoad() {
-          if (!socket || socket.destroyed || !transportId || isMediaLoading) return;
-          isMediaLoading = true;
-          const loadPayload = {
-            type: 'LOAD',
-            requestId: reqId++,
-            autoplay: true,
-            media: {
-              contentId: `${previewUrl}?t=${Date.now()}`,
-              contentType: 'image/jpeg',
-              streamType: 'BUFFERED',
-              metadata: {
-                type: 0,
-                metadataType: 0,
-                title: 'Brisk Cast — Live Screen',
-              },
-            },
+        function sendDashCastUrl() {
+          if (sentUrl || !socket || socket.destroyed || !transportId) return;
+          sentUrl = true;
+          const dashPayload = JSON.stringify({
+            url: receiverPageUrl,
+            force: true,
+            reload: false,
+            reload_time: 0,
+          });
+          socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.madmod.dashcast', dashPayload));
+
+          activeCastClient = {
+            socket,
+            pingInterval,
+            transportId,
+            sessionId,
+            ip: host,
+            deviceId: dev.id,
+            deviceName: dev.name,
+            connectedAt: Date.now(),
           };
-          socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.media', JSON.stringify(loadPayload)));
+
+          notifyUiStatus();
+          clearTimeout(timer);
+          finish({ success: true, deviceName: dev.name, deviceId: dev.id });
         }
 
         socket.on('data', (chunk) => {
@@ -1710,75 +1728,91 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
             try {
               const parsed = JSON.parse(m.payload);
 
-              // Track media player status so we only send next frame once previous frame has fully loaded
-              if (parsed.type === 'MEDIA_STATUS') {
-                const statusList = parsed.status || [];
-                const first = statusList[0];
-                if (first) {
-                  if (first.playerState === 'PAUSED') {
-                    isMediaLoading = false;
-                    lastLoadCompletedTime = Date.now();
-                  } else if (first.playerState === 'IDLE' && first.idleReason) {
-                    isMediaLoading = false;
-                  }
-                }
-              }
-
-              if (parsed.type === 'LOAD_CANCELLED' || parsed.type === 'LOAD_FAILED') {
-                isMediaLoading = false;
-              }
-
               if (parsed.type === 'RECEIVER_STATUS') {
                 const apps = parsed.status?.applications || [];
-                const mediaApp = apps.find((a) => a.appId === 'CC1AD845');
 
-                if (mediaApp) {
-                  transportId = mediaApp.transportId;
-                  sessionId = mediaApp.sessionId;
-
-                  if (!loadSent) {
-                    loadSent = true;
-                    socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.tp.connection', JSON.stringify({ type: 'CONNECT' })));
-                    setTimeout(sendPreviewLoad, 300);
-
-                    // Periodically refresh preview frame once the previous frame is displayed
-                    updateInterval = setInterval(() => {
-                      if (isStreaming && !isPaused && socket && !socket.destroyed && transportId) {
-                        if (!isMediaLoading && (Date.now() - lastLoadCompletedTime >= 2500)) {
-                          sendPreviewLoad();
-                        }
-                      }
-                    }, 1000);
-
-                    activeCastClient = {
-                      socket,
-                      pingInterval,
-                      updateInterval,
-                      transportId,
-                      sessionId,
-                      ip: host,
-                      deviceName: dev.name,
-                      connectedAt: Date.now(),
-                    };
-
-                    notifyUiStatus();
-                    clearTimeout(timer);
-                    finish({ success: true, deviceName: dev.name, deviceId: dev.id });
-                  }
-                } else if (!launchedApp) {
+                // Step 1: Clean start - if another app or stale session is running, cleanly STOP it first
+                if (!launchedApp) {
                   launchedApp = true;
-                  // If another app is running (e.g. stale DashCast or other app), cleanly stop it first
                   if (apps.length > 0) {
                     socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.receiver', JSON.stringify({
                       type: 'STOP',
                       sessionId: apps[0].sessionId,
                       requestId: reqId++,
                     })));
-                    setTimeout(launchDefaultMediaReceiver, 350);
+                    setTimeout(launchDashCast, 600);
                   } else {
-                    launchDefaultMediaReceiver();
+                    launchDashCast();
                   }
+                  return;
                 }
+
+                // Step 2: Handle DashCast receiver app
+                const dashApp = apps.find((a) => a.appId === '84912283');
+                if (dashApp) {
+                  transportId = dashApp.transportId;
+                  sessionId = dashApp.sessionId;
+
+                  socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.tp.connection', JSON.stringify({ type: 'CONNECT' })));
+
+                  // Send URL when DashCast is ready, or after timeout fallback
+                  if (dashApp.statusText === 'Application ready') {
+                    sendDashCastUrl();
+                  } else if (!readyTimeout && !sentUrl) {
+                    readyTimeout = setTimeout(sendDashCastUrl, 2500);
+                  }
+                  return;
+                }
+
+                // Step 3: Handle Default Media Receiver fallback if DashCast not present
+                const mediaApp = apps.find((a) => a.appId === 'CC1AD845');
+                if (mediaApp && !sentUrl) {
+                  transportId = mediaApp.transportId;
+                  sessionId = mediaApp.sessionId;
+                  socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.tp.connection', JSON.stringify({ type: 'CONNECT' })));
+
+                  setTimeout(() => {
+                    if (!sentUrl && socket && !socket.destroyed && transportId) {
+                      sentUrl = true;
+                      const loadPayload = {
+                        type: 'LOAD',
+                        requestId: reqId++,
+                        autoplay: true,
+                        media: {
+                          contentId: `${previewUrl}?t=${Date.now()}`,
+                          contentType: 'image/jpeg',
+                          streamType: 'BUFFERED',
+                          metadata: {
+                            type: 0,
+                            metadataType: 0,
+                            title: 'Brisk Cast — Live Screen',
+                          },
+                        },
+                      };
+                      socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.media', JSON.stringify(loadPayload)));
+
+                      activeCastClient = {
+                        socket,
+                        pingInterval,
+                        transportId,
+                        sessionId,
+                        ip: host,
+                        deviceId: dev.id,
+                        deviceName: dev.name,
+                        connectedAt: Date.now(),
+                      };
+
+                      notifyUiStatus();
+                      clearTimeout(timer);
+                      finish({ success: true, deviceName: dev.name, deviceId: dev.id });
+                    }
+                  }, 400);
+                }
+              }
+
+              // Fallback to CC1AD845 if DashCast launch error received
+              if (parsed.type === 'LAUNCH_ERROR' && !triedFallback) {
+                launchDefaultMediaReceiver();
               }
             } catch {}
           }
@@ -1802,21 +1836,32 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
   }
 
   async function castToDevice(deviceId) {
-    const dev = discoveredDevices.find((d) => d.id === deviceId);
+    let dev = discoveredDevices.find((d) => d.id === deviceId);
+    if (!dev && typeof deviceId === 'string' && deviceId.startsWith('cast_')) {
+      const ip = deviceId.replace('cast_', '');
+      dev = {
+        id: deviceId,
+        name: 'Smart TV Pro',
+        ip,
+        type: 'chromecast',
+        canDirectPlay: true,
+      };
+      addDevice(dev);
+    }
     if (!dev) {
       return { success: false, error: 'Device not found' };
     }
 
     if (!isStreaming) {
-      await start({ source: currentSource || 'screen', quality: jpegQuality, fps: targetFps });
-    }
-
-    if (dev.controlUrl) {
-      return await castToDlnaDevice(deviceId);
+      await start({ source: currentSource || 'tab', quality: jpegQuality, fps: targetFps });
     }
 
     if (dev.type === 'chromecast' || dev.type === 'dial' || dev.ip) {
       return await castToGoogleCastDevice(dev);
+    }
+
+    if (dev.controlUrl) {
+      return await castToDlnaDevice(deviceId);
     }
 
     return { success: false, error: 'Unsupported cast protocol for device' };
@@ -1939,6 +1984,7 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
       qrSvg: generateSvgQr(url),
       clients: clientsList,
       devices: [...discoveredDevices],
+      activeCastDeviceId: activeCastClient ? activeCastClient.deviceId : null,
     };
   }
 

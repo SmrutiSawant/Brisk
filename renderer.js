@@ -2073,6 +2073,7 @@ let castDevices = [];
 let isScanningDevices = false;
 let showManualIpInput = false;
 let castNoticeBanner = null; // { title, message }
+let activeCastDeviceId = null;
 let selectedCastSource = 'tab'; // 'tab' | 'screen' | 'window'
 let selectedQualityPreset = '1080p'; // '1080p' | '60fps' | 'eco'
 
@@ -2317,6 +2318,8 @@ function renderCastPanel() {
       if (API.stopCast) {
         const res = await API.stopCast();
         if (res) castStatus = res;
+        activeCastDeviceId = null;
+        castNoticeBanner = null;
         syncCastButton();
         renderCastPanel();
       }
@@ -2568,13 +2571,37 @@ function renderCastPanel() {
 
       info.append(icon, texts);
 
+      const isDeviceActive = castStatus.isStreaming && (
+        (castStatus.activeCastDeviceId && castStatus.activeCastDeviceId === dev.id) ||
+        (activeCastDeviceId && activeCastDeviceId === dev.id) ||
+        (castStatus.clients && castStatus.clients.some((c) => c.ip === dev.ip))
+      );
+
       const actBtn = document.createElement('button');
-      actBtn.className = 'cp-device-action-btn';
-      if (dev.canDirectPlay) {
+      actBtn.className = 'cp-device-action-btn' + (isDeviceActive ? ' active' : '');
+      if (isDeviceActive) {
+        actBtn.textContent = 'Stop Cast';
+        actBtn.style.background = '#ef4444';
+        actBtn.style.color = '#ffffff';
+        actBtn.style.borderColor = '#dc2626';
+        actBtn.title = `Stop casting to ${dev.name}`;
+        actBtn.addEventListener('click', async () => {
+          actBtn.textContent = 'Stopping…';
+          actBtn.disabled = true;
+          if (API.stopCast) {
+            await API.stopCast();
+          }
+          activeCastDeviceId = null;
+          castNoticeBanner = null;
+          syncCastButton();
+          renderCastPanel();
+        });
+      } else if (dev.canDirectPlay) {
         actBtn.textContent = 'Cast to TV';
         actBtn.title = `Directly cast screen to ${dev.name}`;
         actBtn.addEventListener('click', async () => {
           actBtn.textContent = 'Connecting…';
+          actBtn.disabled = true;
           if (!castStatus.isStreaming) {
             selectedCastSource = selectedCastSource || 'tab';
             await applyCastConfig();
@@ -2582,18 +2609,20 @@ function renderCastPanel() {
           if (API.castToDevice) {
             const res = await API.castToDevice(dev.id);
             if (res && res.success) {
+              activeCastDeviceId = dev.id;
               actBtn.textContent = 'Casting on TV!';
               castNoticeBanner = {
                 title: `Casting to ${dev.name}`,
                 message: `Live screen is now casting directly on ${dev.name}!`,
               };
             } else {
+              activeCastDeviceId = null;
               actBtn.textContent = 'Failed';
               castNoticeBanner = {
                 title: `Cast to ${dev.name}`,
                 message: res && res.error ? `Notice: ${res.error}` : 'Could not stream directly to TV. You can also open the URL on the TV browser.',
               };
-              setTimeout(() => { actBtn.textContent = 'Cast to TV'; }, 3000);
+              setTimeout(() => { actBtn.textContent = 'Cast to TV'; actBtn.disabled = false; }, 3000);
             }
             renderCastPanel();
           }
@@ -2760,6 +2789,12 @@ if (API.onCastStatusChanged) {
   API.onCastStatusChanged((status) => {
     if (status) {
       castStatus = status;
+      if (!status.isStreaming) {
+        activeCastDeviceId = null;
+        castNoticeBanner = null;
+      } else if (status.activeCastDeviceId) {
+        activeCastDeviceId = status.activeCastDeviceId;
+      }
       syncCastButton();
       if (castPanelEl && castPanelEl.classList.contains('open')) {
         renderCastPanel();
