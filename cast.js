@@ -543,6 +543,59 @@ function getReceiverHtml(title, serverPort) {
   });
   canvas.addEventListener('dblclick', toggleFullScreen);
 
+  let isDrawingFrame = false;
+  let pendingBlob = null;
+
+  function drawNextFrame(blob) {
+    if (isDrawingFrame) {
+      pendingBlob = blob;
+      return;
+    }
+    isDrawingFrame = true;
+
+    const done = () => {
+      isDrawingFrame = false;
+      if (pendingBlob) {
+        const next = pendingBlob;
+        pendingBlob = null;
+        drawNextFrame(next);
+      }
+    };
+
+    if (window.createImageBitmap) {
+      createImageBitmap(blob).then((bitmap) => {
+        if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+        }
+        ctx.drawImage(bitmap, 0, 0);
+        bitmap.close();
+        done();
+      }).catch(() => fallbackDraw(blob, done));
+    } else {
+      fallbackDraw(blob, done);
+    }
+  }
+
+  function fallbackDraw(blob, done) {
+    const img = new Image();
+    const url = URL.createObjectURL(blob);
+    img.onload = () => {
+      if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+      }
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      if (done) done();
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      if (done) done();
+    };
+    img.src = url;
+  }
+
   // WebSocket frame receiver
   function connect() {
     if (useFallback) return startMjpeg();
@@ -582,33 +635,8 @@ function getReceiverHtml(title, serverPort) {
       }
 
       const blob = new Blob([event.data], { type: 'image/jpeg' });
-      if (window.createImageBitmap) {
-        createImageBitmap(blob).then((bitmap) => {
-          if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-            canvas.width = bitmap.width;
-            canvas.height = bitmap.height;
-          }
-          ctx.drawImage(bitmap, 0, 0);
-          bitmap.close();
-        }).catch(() => fallbackDraw(blob));
-      } else {
-        fallbackDraw(blob);
-      }
+      drawNextFrame(blob);
     };
-
-    function fallbackDraw(blob) {
-      const img = new Image();
-      const url = URL.createObjectURL(blob);
-      img.onload = () => {
-        if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
-          canvas.width = img.naturalWidth;
-          canvas.height = img.naturalHeight;
-        }
-        ctx.drawImage(img, 0, 0);
-        URL.revokeObjectURL(url);
-      };
-      img.src = url;
-    }
 
     ws.onclose = () => {
       overlay.classList.remove('hidden');
@@ -805,7 +833,9 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
       const frame = createWsFrame(jpegBuffer, 0x82);
       for (const client of activeWsClients) {
         try {
-          if (client.writable) client.write(frame);
+          if (client.writable && client.writableLength < 512 * 1024) {
+            client.write(frame);
+          }
         } catch {
           activeWsClients.delete(client);
         }
@@ -1640,6 +1670,7 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
       let reqId = 1;
       let launchedApp = false;
       let sentUrl = false;
+      let sentOnReady = false;
       let triedFallback = false;
       let readyTimeout = null;
 
@@ -1665,7 +1696,7 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
         const pingInterval = setInterval(() => {
           if (socket && !socket.destroyed) {
             socket.write(buildCastMessage('sender-0', 'receiver-0', 'urn:x-cast:com.google.cast.tp.heartbeat', JSON.stringify({ type: 'PING' })));
-            if (transportId) {
+            if (transportId && !sentUrl) {
               socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.tp.heartbeat', JSON.stringify({ type: 'PING' })));
             }
           }
@@ -1692,8 +1723,14 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
           }
         }
 
-        function sendDashCastUrl() {
-          if (sentUrl || !socket || socket.destroyed || !transportId) return;
+        function sendDashCastUrl(isReadySignal = false) {
+          if (!socket || socket.destroyed || !transportId) return;
+          if (isReadySignal) {
+            if (sentOnReady) return;
+            sentOnReady = true;
+          } else if (sentUrl) {
+            return;
+          }
           sentUrl = true;
           const dashPayload = JSON.stringify({
             url: receiverPageUrl,
@@ -1755,11 +1792,15 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
 
                   socket.write(buildCastMessage('sender-0', transportId, 'urn:x-cast:com.google.cast.tp.connection', JSON.stringify({ type: 'CONNECT' })));
 
-                  // Send URL when DashCast is ready, or after timeout fallback
+                  // Send URL when DashCast is ready, or after 6s fallback
                   if (dashApp.statusText === 'Application ready') {
-                    sendDashCastUrl();
+                    if (readyTimeout) {
+                      clearTimeout(readyTimeout);
+                      readyTimeout = null;
+                    }
+                    sendDashCastUrl(true);
                   } else if (!readyTimeout && !sentUrl) {
-                    readyTimeout = setTimeout(sendDashCastUrl, 2500);
+                    readyTimeout = setTimeout(() => sendDashCastUrl(false), 6000);
                   }
                   return;
                 }
@@ -1824,8 +1865,11 @@ function createCastManager({ getActiveTabWebContents, getMainWindow, notify, use
         });
 
         socket.on('close', () => {
+          clearInterval(pingInterval);
+          if (readyTimeout) clearTimeout(readyTimeout);
           if (activeCastClient && activeCastClient.socket === socket) {
-            disconnectActiveCastClient();
+            activeCastClient = null;
+            notifyUiStatus();
           }
         });
       } catch (err) {
